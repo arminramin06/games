@@ -255,3 +255,111 @@ export function getCountryFlagUrl(isoA3: string): string | null {
   return `https://flagcdn.com/w256/${code2.toLowerCase()}.png`;
 }
 
+// ─── Continent System ─────────────────────────────────────────────────────────
+
+export type Continent = 'Africa' | 'Asia' | 'Europe' | 'North America' | 'South America' | 'Oceania';
+
+export const ALL_CONTINENTS: Continent[] = ['Africa', 'Asia', 'Europe', 'North America', 'South America', 'Oceania'];
+
+export const CONTINENT_EMOJIS: Record<Continent, string> = {
+  'Africa':        '🌍',
+  'Asia':          '🌏',
+  'Europe':        '🏛️',
+  'North America': '🌎',
+  'South America': '🌎',
+  'Oceania':       '🏝️',
+};
+
+export const CONTINENT_COLORS: Record<Continent, { bg: string; border: string; text: string }> = {
+  'Africa':        { bg: 'rgba(251,146,60,0.15)',  border: 'rgba(251,146,60,0.35)',  text: '#fb923c' },
+  'Asia':          { bg: 'rgba(239,68,68,0.15)',   border: 'rgba(239,68,68,0.35)',   text: '#f87171' },
+  'Europe':        { bg: 'rgba(99,102,241,0.15)',  border: 'rgba(99,102,241,0.35)',  text: '#818cf8' },
+  'North America': { bg: 'rgba(6,182,212,0.15)',   border: 'rgba(6,182,212,0.35)',   text: '#22d3ee' },
+  'South America': { bg: 'rgba(16,185,129,0.15)',  border: 'rgba(16,185,129,0.35)',  text: '#34d399' },
+  'Oceania':       { bg: 'rgba(168,85,247,0.15)',  border: 'rgba(168,85,247,0.35)',  text: '#c084fc' },
+};
+
+/** Maps every ISO-A3 code to its continent (197 countries). */
+export const continentMap: Record<string, Continent> = {
+  // ── Africa (55) ──────────────────────────────────────────────────────────
+  DZA:'Africa', AGO:'Africa', BEN:'Africa', BWA:'Africa', BFA:'Africa',
+  BDI:'Africa', CMR:'Africa', CPV:'Africa', CAF:'Africa', TCD:'Africa',
+  COM:'Africa', COD:'Africa', COG:'Africa', CIV:'Africa', DJI:'Africa',
+  EGY:'Africa', GNQ:'Africa', ERI:'Africa', ETH:'Africa', GAB:'Africa',
+  GMB:'Africa', GHA:'Africa', GIN:'Africa', GNB:'Africa', KEN:'Africa',
+  LSO:'Africa', LBR:'Africa', LBY:'Africa', MDG:'Africa', MWI:'Africa',
+  MLI:'Africa', MRT:'Africa', MUS:'Africa', MAR:'Africa', MOZ:'Africa',
+  NAM:'Africa', NER:'Africa', NGA:'Africa', RWA:'Africa', STP:'Africa',
+  SEN:'Africa', SYC:'Africa', SLE:'Africa', SOM:'Africa', ZAF:'Africa',
+  SSD:'Africa', SDN:'Africa', SWZ:'Africa', TZA:'Africa', TGO:'Africa',
+  TUN:'Africa', UGA:'Africa', ZMB:'Africa', ZWE:'Africa', ESH:'Africa',
+
+  // ── Asia (48) ────────────────────────────────────────────────────────────
+  AFG:'Asia', ARM:'Asia', AZE:'Asia', BHR:'Asia', BGD:'Asia',
+  BTN:'Asia', BRN:'Asia', KHM:'Asia', CHN:'Asia', GEO:'Asia',
+  IND:'Asia', IDN:'Asia', IRN:'Asia', IRQ:'Asia', ISR:'Asia',
+  JPN:'Asia', JOR:'Asia', KAZ:'Asia', PRK:'Asia', KOR:'Asia',
+  KWT:'Asia', KGZ:'Asia', LAO:'Asia', LBN:'Asia', MYS:'Asia',
+  MDV:'Asia', MNG:'Asia', MMR:'Asia', NPL:'Asia', OMN:'Asia',
+  PAK:'Asia', PSE:'Asia', PHL:'Asia', QAT:'Asia', SAU:'Asia',
+  SGP:'Asia', LKA:'Asia', SYR:'Asia', TWN:'Asia', TJK:'Asia',
+  THA:'Asia', TLS:'Asia', TUR:'Asia', TKM:'Asia', ARE:'Asia',
+  UZB:'Asia', VNM:'Asia', YEM:'Asia',
+
+  // ── Europe (45) ──────────────────────────────────────────────────────────
+  ALB:'Europe', AND:'Europe', AUT:'Europe', BLR:'Europe', BEL:'Europe',
+  BIH:'Europe', BGR:'Europe', HRV:'Europe', CYP:'Europe', CZE:'Europe',
+  DNK:'Europe', EST:'Europe', FIN:'Europe', FRA:'Europe', DEU:'Europe',
+  GRC:'Europe', HUN:'Europe', ISL:'Europe', IRL:'Europe', ITA:'Europe',
+  LVA:'Europe', LIE:'Europe', LTU:'Europe', LUX:'Europe', MLT:'Europe',
+  MDA:'Europe', MCO:'Europe', MNE:'Europe', NLD:'Europe', MKD:'Europe',
+  NOR:'Europe', POL:'Europe', PRT:'Europe', ROU:'Europe', RUS:'Europe',
+  SMR:'Europe', SRB:'Europe', SVK:'Europe', SVN:'Europe', ESP:'Europe',
+  SWE:'Europe', CHE:'Europe', UKR:'Europe', GBR:'Europe', VAT:'Europe',
+
+  // ── North America (23) ───────────────────────────────────────────────────
+  ATG:'North America', BHS:'North America', BRB:'North America', BLZ:'North America',
+  CAN:'North America', CRI:'North America', CUB:'North America', DMA:'North America',
+  DOM:'North America', SLV:'North America', GRD:'North America', GTM:'North America',
+  HTI:'North America', HND:'North America', JAM:'North America', MEX:'North America',
+  NIC:'North America', PAN:'North America', KNA:'North America', LCA:'North America',
+  VCT:'North America', TTO:'North America', USA:'North America',
+
+  // ── South America (12) ───────────────────────────────────────────────────
+  ARG:'South America', BOL:'South America', BRA:'South America', CHL:'South America',
+  COL:'South America', ECU:'South America', GUY:'South America', PRY:'South America',
+  PER:'South America', SUR:'South America', URY:'South America', VEN:'South America',
+
+  // ── Oceania (14) ─────────────────────────────────────────────────────────
+  AUS:'Oceania', FJI:'Oceania', KIR:'Oceania', MHL:'Oceania', FSM:'Oceania',
+  NRU:'Oceania', NZL:'Oceania', PLW:'Oceania', PNG:'Oceania', WSM:'Oceania',
+  SLB:'Oceania', TON:'Oceania', TUV:'Oceania', VUT:'Oceania',
+};
+
+/** Returns the continent for a given ISO-A3 code. */
+export function getCountryContinent(isoA3: string): Continent | null {
+  return continentMap[isoA3.toUpperCase()] ?? null;
+}
+
+/** Per-continent named vs total stats, given a set of guessed ISO codes. */
+export function getContinentStats(
+  guessedIsoCodes: Set<string>
+): Record<Continent, { total: number; named: number }> {
+  const stats = {} as Record<Continent, { total: number; named: number }>;
+  for (const c of ALL_CONTINENTS) stats[c] = { total: 0, named: 0 };
+
+  for (const country of countriesDatabase) {
+    const c = continentMap[country.isoA3];
+    if (c) {
+      stats[c].total++;
+      if (guessedIsoCodes.has(country.isoA3)) stats[c].named++;
+    }
+  }
+  return stats;
+}
+
+/** Returns all continents that still have at least one unguessed country. */
+export function getAvailableContinents(guessedIsoCodes: Set<string>): Continent[] {
+  const stats = getContinentStats(guessedIsoCodes);
+  return ALL_CONTINENTS.filter(c => stats[c].named < stats[c].total);
+}

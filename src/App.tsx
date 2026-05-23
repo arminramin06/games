@@ -1,10 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import { Trophy, HelpCircle, User, Zap, AlertTriangle, ArrowRight, Play, RotateCcw, Volume2, Mic, MicOff, Sliders, Skull } from 'lucide-react';
+import { Trophy, HelpCircle, User, Zap, AlertTriangle, ArrowRight, Play, RotateCcw, Volume2, Mic, MicOff, Sliders, Skull, Globe } from 'lucide-react';
 import PlayerSetup from './components/PlayerSetup';
 import WorldMap from './components/WorldMap';
 import Leaderboard from './components/Leaderboard';
-import { findCountry, getCountryFlagUrl, countriesDatabase } from './utils/countries';
+import {
+  findCountry, getCountryFlagUrl, countriesDatabase,
+  getCountryContinent, getContinentStats, getAvailableContinents,
+  Continent, ALL_CONTINENTS, CONTINENT_EMOJIS, CONTINENT_COLORS
+} from './utils/countries';
 import { playSuccess, playFailure, playWinner } from './utils/audio';
 import { isSpeechRecognitionSupported, createSpeechRecognitionInstance, announceTurn } from './utils/speech';
 
@@ -50,6 +54,11 @@ export default function App() {
   const [gameOverReason, setGameOverReason] = useState<GameOverReason>('timer');
   const [eliminatedPlayer, setEliminatedPlayer] = useState<string>('');
 
+  // Continent challenge — the continent each active player must name a country from
+  const [currentContinent, setCurrentContinent] = useState<Continent>('Europe');
+  const currentContinentRef = useRef<Continent>('Europe');
+  useEffect(() => { currentContinentRef.current = currentContinent; }, [currentContinent]);
+
   // Sound warm up notice
   const [audioWarmed, setAudioWarmed] = useState(false);
 
@@ -87,6 +96,21 @@ export default function App() {
   // Derived helpers
   const activeName = players[activeIndex] ?? '';
 
+  /**
+   * Picks a random continent that still has unguessed countries.
+   * Avoids repeating the same continent back-to-back if alternatives exist.
+   */
+  const pickNextContinent = (guessedCodes: Set<string>, excludeContinent: Continent | null): Continent => {
+    const available = getAvailableContinents(guessedCodes);
+    if (available.length === 0) {
+      // All countries named — game should end, but fallback to any continent
+      return ALL_CONTINENTS[Math.floor(Math.random() * ALL_CONTINENTS.length)];
+    }
+    const preferred = available.filter(c => c !== excludeContinent);
+    const pool = preferred.length > 0 ? preferred : available;
+    return pool[Math.floor(Math.random() * pool.length)];
+  };
+
   // Start the match
   const handleStartGame = async (playerNames: string[]) => {
     setPlayers(playerNames);
@@ -112,8 +136,13 @@ export default function App() {
       // Ignore
     }
 
+    // Pick initial continent and announce
+    const initialContinent = pickNextContinent(new Set(), null);
+    setCurrentContinent(initialContinent);
+    currentContinentRef.current = initialContinent;
+
     if (announcerEnabled) {
-      setTimeout(() => announceTurn(playerNames[0], speechPitch, speechRate), 1000);
+      setTimeout(() => announceTurn(playerNames[0], initialContinent, speechPitch, speechRate), 1000);
     }
 
     // Register all players in local SQLite database
@@ -261,101 +290,106 @@ export default function App() {
     const currentIdx = activeIndexRef.current;
     const matched = findCountry(trimmedQuery);
     const nextIdx = (currentIdx + 1) % players.length;
-    const nextPlayerName = players[nextIdx];
     const currentPlayerName = players[currentIdx] ?? '';
 
-    const triggerTurnAnnouncement = () => {
+    /**
+     * Advance the turn: pick new continent, set active player, announce.
+     * Pass the current guessedCodes set so pickNextContinent can avoid empty continents.
+     */
+    const handleTurnChange = (toIdx: number, guessedCodes: Set<string>) => {
+      const nextContinent = pickNextContinent(guessedCodes, currentContinentRef.current);
+      setCurrentContinent(nextContinent);
+      currentContinentRef.current = nextContinent;
+      setActiveIndex(toIdx);
       if (announcerEnabled) {
         setTimeout(() => {
-          // Guard: only speak if the game is still active by the time the delay fires
           if (gamePhaseRef.current === 'active') {
-            announceTurn(nextPlayerName, speechPitch, speechRate);
+            announceTurn(players[toIdx], nextContinent, speechPitch, speechRate);
           }
         }, 1100);
       }
     };
 
+    /** Shared miss handler — increments streak, checks double-fail. Returns true if game ended. */
+    const handleMiss = (msg: string): boolean => {
+      playFailure();
+      setShowCross(true);
+      setShakeMap(true);
+      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
+      const failStreak = consecutiveFailsRef.current[currentIdx];
+      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+
+      if (failStreak >= 2) {
+        setGameMessage({ text: `💀 ${currentPlayerName} missed twice in a row! Game over!`, type: 'error' });
+        setEliminatedPlayer(currentPlayerName);
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setTimeout(() => handleEndGame('double_fail'), 1800);
+        return true;
+      }
+      setGameMessage({ text: `${msg} (${failStreak}/2 misses)`, type: 'error' });
+      setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+      handleTurnChange(nextIdx, guessedCountries);
+      return false;
+    };
+
     if (!matched) {
       // ── Wrong guess: country not recognised ──────────────────────────
-      playFailure();
-      setShowCross(true);
-      setShakeMap(true);
-      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
-      const failStreak = consecutiveFailsRef.current[currentIdx];
-      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+      handleMiss(`${currentPlayerName} guessed "${trimmedQuery}" — not found!`);
 
-      if (failStreak >= 2) {
-        // ❌❌ Double-fail elimination
-        setGameMessage({ text: `💀 ${currentPlayerName} missed twice in a row! Game over!`, type: 'error' });
-        setEliminatedPlayer(currentPlayerName);
-        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-        setTimeout(() => handleEndGame('double_fail'), 1800);
-      } else {
-        setGameMessage({ text: `${currentPlayerName} guessed "${trimmedQuery}" — not found! (${failStreak}/2 misses)`, type: 'error' });
-        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-        setActiveIndex(nextIdx);
-        triggerTurnAnnouncement();
-      }
     } else if (guessedCountries.has(matched.isoA3)) {
       // ── Already guessed ──────────────────────────────────────────────
-      playFailure();
-      setShowCross(true);
-      setShakeMap(true);
-      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
-      const failStreak = consecutiveFailsRef.current[currentIdx];
-      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+      handleMiss(`"${matched.name}" already guessed!`);
 
-      if (failStreak >= 2) {
-        setGameMessage({ text: `💀 ${currentPlayerName} missed twice in a row! Game over!`, type: 'error' });
-        setEliminatedPlayer(currentPlayerName);
-        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-        setTimeout(() => handleEndGame('double_fail'), 1800);
-      } else {
-        setGameMessage({ text: `"${matched.name}" already guessed! (${failStreak}/2 misses for ${currentPlayerName})`, type: 'error' });
-        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-        setActiveIndex(nextIdx);
-        triggerTurnAnnouncement();
-      }
     } else {
-      // ── Correct guess ────────────────────────────────────────────────
-      playSuccess();
+      // ── Valid, unguessed country — check continent ───────────────────
+      const countryContinent = getCountryContinent(matched.isoA3);
+      const requiredContinent = currentContinentRef.current;
 
-      // Reset this player's fail streak
-      consecutiveFailsRef.current[currentIdx] = 0;
-      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = 0; return next; });
-
-      const nextGuessed = new Set(guessedCountries);
-      nextGuessed.add(matched.isoA3);
-      setGuessedCountries(nextGuessed);
-      setGuessedNames(prev => [matched.name, ...prev]);
-
-      // Confetti origin spread across players evenly
-      const xOrigin = players.length === 1 ? 0.5 : currentIdx / (players.length - 1);
-      confetti({
-        particleCount: 30,
-        angle: 60 + (xOrigin * 60),
-        spread: 55,
-        origin: { x: Math.max(0.1, Math.min(0.9, xOrigin)), y: 0.2 }
-      });
-
-      // Award point to the CURRENT player using ref index (never stale)
-      setScores(prev => {
-        const next = [...prev];
-        next[currentIdx] = (next[currentIdx] ?? 0) + 1;
-        return next;
-      });
-
-      const flagUrl = getCountryFlagUrl(matched.isoA3);
-      if (flagUrl) setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
-
-      // Check win condition 2: all countries named
-      if (nextGuessed.size >= countriesDatabase.length) {
-        setGameMessage({ text: `🌍 ${currentPlayerName} named the last country! All ${countriesDatabase.length} countries discovered!`, type: 'success' });
-        setTimeout(() => handleEndGame('all_named'), 2000);
+      if (countryContinent !== requiredContinent) {
+        // ── Wrong continent ─────────────────────────────────────────────
+        handleMiss(
+          `${matched.name} is in ${countryContinent ?? 'Unknown'}, not ${requiredContinent}!`
+        );
       } else {
-        setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
-        setActiveIndex(nextIdx);
-        triggerTurnAnnouncement();
+        // ── Correct country in correct continent ────────────────────────
+        playSuccess();
+
+        // Reset this player's fail streak
+        consecutiveFailsRef.current[currentIdx] = 0;
+        setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = 0; return next; });
+
+        const nextGuessed = new Set(guessedCountries);
+        nextGuessed.add(matched.isoA3);
+        setGuessedCountries(nextGuessed);
+        setGuessedNames(prev => [matched.name, ...prev]);
+
+        // Confetti origin spread across players evenly
+        const xOrigin = players.length === 1 ? 0.5 : currentIdx / (players.length - 1);
+        confetti({
+          particleCount: 30,
+          angle: 60 + (xOrigin * 60),
+          spread: 55,
+          origin: { x: Math.max(0.1, Math.min(0.9, xOrigin)), y: 0.2 }
+        });
+
+        // Award point to the CURRENT player using ref index (never stale)
+        setScores(prev => {
+          const next = [...prev];
+          next[currentIdx] = (next[currentIdx] ?? 0) + 1;
+          return next;
+        });
+
+        const flagUrl = getCountryFlagUrl(matched.isoA3);
+        if (flagUrl) setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
+
+        // Check win condition 2: all countries named
+        if (nextGuessed.size >= countriesDatabase.length) {
+          setGameMessage({ text: `🌍 ${currentPlayerName} named the last country! All ${countriesDatabase.length} countries discovered!`, type: 'success' });
+          setTimeout(() => handleEndGame('all_named'), 2000);
+        } else {
+          setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
+          handleTurnChange(nextIdx, nextGuessed);
+        }
       }
     }
 
@@ -524,6 +558,46 @@ export default function App() {
                 )}
               </div>
             </div>
+            {/* Continent Progress */}
+            <div className="glass-container" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <h3 style={{ fontSize: '14px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                <Globe size={14} style={{ color: 'var(--neon-cyan)' }} /> Continent Progress
+              </h3>
+              {(() => {
+                const stats = getContinentStats(guessedCountries);
+                return ALL_CONTINENTS.map(continent => {
+                  const { named, total } = stats[continent];
+                  const pct = total > 0 ? (named / total) * 100 : 0;
+                  const color = CONTINENT_COLORS[continent];
+                  const isActive = continent === currentContinent;
+                  return (
+                    <div key={continent} style={{
+                      padding: '7px 10px', borderRadius: '10px',
+                      background: isActive ? color.bg : 'rgba(255,255,255,0.02)',
+                      border: `1px solid ${isActive ? color.border : 'rgba(255,255,255,0.05)'}`,
+                      transition: 'all 0.3s ease',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: isActive ? 700 : 500, color: isActive ? color.text : 'var(--text-secondary)' }}>
+                          {CONTINENT_EMOJIS[continent]} {continent}
+                          {isActive && <span style={{ marginLeft: '5px', fontSize: '8px', background: color.bg, border: `1px solid ${color.border}`, color: color.text, padding: '1px 4px', borderRadius: '4px', fontWeight: 800 }}>NOW</span>}
+                        </span>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: named === total && total > 0 ? 'var(--neon-green)' : color.text }}>
+                          {named}/{total}{named === total && total > 0 ? ' ✅' : ''}
+                        </span>
+                      </div>
+                      <div style={{ height: '3px', background: 'rgba(255,255,255,0.08)', borderRadius: '2px' }}>
+                        <div style={{
+                          width: `${pct}%`, height: '100%', borderRadius: '2px',
+                          background: named === total && total > 0 ? 'var(--neon-green)' : color.text,
+                          transition: 'width 0.5s ease',
+                        }} />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
 
             {/* Voice announcer controls */}
             <div className="glass-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -593,6 +667,28 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             {/* Console Guess Input Bar */}
             <div className="glass-container" style={{ padding: '20px' }}>
+              {/* Continent Challenge Banner */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '12px',
+                marginBottom: '16px', padding: '10px 16px', borderRadius: '12px',
+                background: CONTINENT_COLORS[currentContinent].bg,
+                border: `1.5px solid ${CONTINENT_COLORS[currentContinent].border}`,
+              }}>
+                <Globe size={18} style={{ color: CONTINENT_COLORS[currentContinent].text, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: '10px', fontWeight: 600, color: CONTINENT_COLORS[currentContinent].text, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.8 }}>
+                    Continent Challenge
+                  </div>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#fff', marginTop: '1px' }}>
+                    {CONTINENT_EMOJIS[currentContinent]}&nbsp; Name a country in&nbsp;
+                    <span style={{ color: CONTINENT_COLORS[currentContinent].text }}>{currentContinent}</span>
+                  </div>
+                </div>
+                <div style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'right' }}>
+                  Wrong continent = miss!
+                </div>
+              </div>
+
               <form onSubmit={handleGuessSubmit} style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '8px',

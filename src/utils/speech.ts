@@ -82,15 +82,17 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
  * Pick a randomized fun turn announcer script and speak it.
  */
 const turnScripts = [
-  "{name}, it's your turn!",
-  "{name}, name a country!",
-  "{name}, search the globe!",
-  "{name}, your move!",
-  "{name}, find a country!"
+  "{name}! Name a country in {continent}!",
+  "{name}, can you name a country in {continent}?",
+  "{name}, find a country in {continent}!",
+  "Go {name}! Find a country in {continent}!",
+  "{continent} is up — your turn, {name}!",
 ];
 
-export function announceTurn(playerName: string, pitch = 1.1, rate = 1.0) {
-  const randomScript = turnScripts[Math.floor(Math.random() * turnScripts.length)];
-  const announcement = randomScript.replace('{name}', playerName);
+export function announceTurn(playerName: string, continent: string, pitch = 1.1, rate = 1.0) {
+  const template = turnScripts[Math.floor(Math.random() * turnScripts.length)];
+  const announcement = template
+    .replace('{name}', playerName)
+    .replace('{continent}', continent);
   speakText(announcement, pitch, rate);
 }
