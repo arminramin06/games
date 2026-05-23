@@ -50,7 +50,7 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
         const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
         if (!res.ok) throw new Error('Failed to fetch map');
         const topology = await res.json();
-        
+
         // Convert TopoJSON to GeoJSON features
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const geojson = feature(topology, topology.objects.countries) as any;
@@ -78,7 +78,7 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
   const getCountryStatus = (feat: MapFeature) => {
     const mapCountryName = feat.properties.name;
     const matched = findCountry(mapCountryName);
-    
+
     if (!matched) {
       // Fallback matching logic for custom names in TopoJSON
       let fallbackMatched = null;
@@ -91,7 +91,7 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
       } else if (normalizeString(mapCountryName) === "russia") {
         fallbackMatched = findCountry("Russia");
       }
-      
+
       if (fallbackMatched) {
         return {
           dbCountry: fallbackMatched,
@@ -233,7 +233,7 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
           {countries.map((feat, idx) => {
             const { dbCountry, isGuessed } = getCountryStatus(feat);
             const pathData = pathGenerator(feat as unknown as GeoJSON.Feature) || '';
-            
+
             if (!pathData) return null;
 
             return (
