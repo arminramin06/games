@@ -69,6 +69,10 @@ export default function App() {
   const [speechPitch, setSpeechPitch] = useState(1.1);
   const [speechRate, setSpeechRate] = useState(1.0);
 
+  // Push-to-talk state
+  const [pttActive, setPttActive] = useState(false);
+  const pttRecognitionRef = useRef<any>(null); // separate instance for PTT
+
   const recognitionRef = useRef<any>(null);
   // Always-current ref for activeIndex — prevents stale closure bugs in speech callbacks
   const activeIndexRef = useRef(activeIndex);
@@ -198,6 +202,69 @@ export default function App() {
       }
     }
   // Only recreate on mount — activeIndex is handled via activeIndexRef
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Spacebar Push-to-Talk ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isSpeechRecognitionSupported()) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      if (e.repeat) return; // ignore key-hold repeats
+      if (gamePhaseRef.current !== 'active') return;
+      // Don't hijack spacebar when user is typing in an input/textarea
+      const tag = (document.activeElement as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+      e.preventDefault(); // stop page scroll
+
+      // Stop the always-on mic if it was running
+      try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+
+      // Create a fresh short-lived PTT recognition instance
+      const rec = createSpeechRecognitionInstance();
+      if (!rec) return;
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.onresult = (event: any) => {
+        const result = event.results[event.results.length - 1];
+        const transcript = result[0].transcript.trim();
+        if (transcript) setCurrentGuess(transcript);
+      };
+      rec.onerror = () => { setPttActive(false); };
+      rec.onend = () => {
+        setPttActive(false);
+        // After recognition ends, submit whatever is in the input
+        // Use a tiny delay so React state (currentGuess) has settled
+        setTimeout(() => {
+          const inputEl = document.querySelector<HTMLInputElement>('input.glass-input');
+          const val = inputEl?.value.trim();
+          if (val) processGuessRef.current(val);
+        }, 80);
+      };
+      pttRecognitionRef.current = rec;
+      try {
+        rec.start();
+        setPttActive(true);
+        setCurrentGuess(''); // clear box so transcript can fill it fresh
+      } catch { /* recognition already started */ }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return;
+      if (!pttRecognitionRef.current) return;
+      e.preventDefault();
+      try { pttRecognitionRef.current.stop(); } catch { /* ignore */ }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+    };
+  // Re-register if speech support changes; processGuessRef is a ref so it never changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -778,18 +845,52 @@ export default function App() {
                 </button>
               </form>
 
-              {gameMessage.text && (
+              {/* PTT active indicator — replaces normal game message while space is held */}
+              {pttActive ? (
                 <div style={{
-                  marginTop: '12px', fontSize: '13px', fontWeight: 500,
-                  color: gameMessage.type === 'success' ? 'var(--neon-green)'
-                    : gameMessage.type === 'error' ? 'var(--neon-red)'
-                    : 'var(--text-secondary)',
-                  display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '4px'
+                  marginTop: '12px', display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '8px 14px', borderRadius: '10px',
+                  background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.4)',
+                  animation: 'neonPulse 0.8s infinite ease-in-out',
                 }}>
-                  {gameMessage.type === 'error' && <AlertTriangle size={14} />}
-                  {gameMessage.type === 'success' && <span>🎉</span>}
-                  {gameMessage.type === 'info' && <span>🎮</span>}
-                  {gameMessage.text}
+                  <div style={{
+                    width: '10px', height: '10px', borderRadius: '50%',
+                    background: 'var(--neon-red)', boxShadow: '0 0 8px var(--neon-red)',
+                    animation: 'neonPulse 0.6s infinite ease-in-out',
+                  }} />
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--neon-red)', letterSpacing: '0.04em' }}>
+                    SPEAKING… Release SPACE to submit
+                  </span>
+                </div>
+              ) : (
+                gameMessage.text && (
+                  <div style={{
+                    marginTop: '12px', fontSize: '13px', fontWeight: 500,
+                    color: gameMessage.type === 'success' ? 'var(--neon-green)'
+                      : gameMessage.type === 'error' ? 'var(--neon-red)'
+                      : 'var(--text-secondary)',
+                    display: 'flex', alignItems: 'center', gap: '8px', paddingLeft: '4px'
+                  }}>
+                    {gameMessage.type === 'error' && <AlertTriangle size={14} />}
+                    {gameMessage.type === 'success' && <span>🎉</span>}
+                    {gameMessage.type === 'info' && <span>🎮</span>}
+                    {gameMessage.text}
+                  </div>
+                )
+              )}
+
+              {/* PTT keyboard hint */}
+              {isSpeechRecognitionSupported() && !pttActive && (
+                <div style={{
+                  marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)',
+                  display: 'flex', alignItems: 'center', gap: '6px', paddingLeft: '4px'
+                }}>
+                  <kbd style={{
+                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: '4px', padding: '1px 6px', fontSize: '10px', fontFamily: 'monospace',
+                    color: 'var(--text-secondary)'
+                  }}>SPACE</kbd>
+                  <span>Hold to speak • Release to submit</span>
                 </div>
               )}
             </div>
