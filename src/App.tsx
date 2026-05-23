@@ -64,6 +64,10 @@ export default function App() {
   const activeIndexRef = useRef(activeIndex);
   useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
 
+  // Mirrors phase state in a ref so setTimeout callbacks can check it without stale closure issues
+  const gamePhaseRef = useRef<GamePhase>('setup');
+  useEffect(() => { gamePhaseRef.current = phase; }, [phase]);
+
   // Per-player consecutive wrong-guess streak
   // ref = never stale inside processGuess; state = triggers re-render for the warning badge UI
   const consecutiveFailsRef = useRef<number[]>([]);
@@ -210,9 +214,13 @@ export default function App() {
     if (timerRef.current) clearInterval(timerRef.current);
     setGameOverReason(reason);
     setPhase('gameover');
+    gamePhaseRef.current = 'gameover'; // set immediately so in-flight timeouts see it
 
-    // Stop mic if running
+    // Stop mic and kill any announcer speech immediately
     try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
 
     // Use latest scores from state via functional update pattern
     setScores(currentScores => {
@@ -258,7 +266,12 @@ export default function App() {
 
     const triggerTurnAnnouncement = () => {
       if (announcerEnabled) {
-        setTimeout(() => announceTurn(nextPlayerName, speechPitch, speechRate), 1100);
+        setTimeout(() => {
+          // Guard: only speak if the game is still active by the time the delay fires
+          if (gamePhaseRef.current === 'active') {
+            announceTurn(nextPlayerName, speechPitch, speechRate);
+          }
+        }, 1100);
       }
     };
 
