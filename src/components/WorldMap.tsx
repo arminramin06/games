@@ -5,7 +5,8 @@ import { findCountry, normalizeString } from '../utils/countries';
 import { X } from 'lucide-react';
 
 interface WorldMapProps {
-  guessedIsoCodes: Set<string>;
+  guessedCountriesMap: Map<string, number>; // isoA3 -> playerIndex
+  playerMapColors: string[];                // hex fill per player index
   showFailureCross: boolean;
   onCountryClick?: (countryName: string) => void;
 }
@@ -19,7 +20,7 @@ interface MapFeature {
   geometry: GeoJSON.Geometry;
 }
 
-export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryClick }: WorldMapProps) {
+export default function WorldMap({ guessedCountriesMap, playerMapColors, showFailureCross, onCountryClick }: WorldMapProps) {
   const [countries, setCountries] = useState<MapFeature[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -73,10 +74,13 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
 
   const pathGenerator = d3.geoPath().projection(projection);
 
-  // Helper to check if a map country matches any in our database and gets its status
-  const getCountryStatus = (feat: MapFeature) => {
+  // Helper to check if a map country matches our database and get its discoverer player index
+  const getCountryStatus = (feat: MapFeature): { dbCountry: ReturnType<typeof findCountry>; playerIndex: number | null } => {
     const mapCountryName = feat.properties.name;
     const matched = findCountry(mapCountryName);
+
+    const resolvePlayerIndex = (isoA3: string) =>
+      guessedCountriesMap.has(isoA3) ? (guessedCountriesMap.get(isoA3) ?? null) : null;
 
     if (!matched) {
       // Fallback matching logic for custom names in TopoJSON
@@ -92,18 +96,12 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
       }
 
       if (fallbackMatched) {
-        return {
-          dbCountry: fallbackMatched,
-          isGuessed: guessedIsoCodes.has(fallbackMatched.isoA3)
-        };
+        return { dbCountry: fallbackMatched, playerIndex: resolvePlayerIndex(fallbackMatched.isoA3) };
       }
-      return { dbCountry: null, isGuessed: false };
+      return { dbCountry: null, playerIndex: null };
     }
 
-    return {
-      dbCountry: matched,
-      isGuessed: guessedIsoCodes.has(matched.isoA3)
-    };
+    return { dbCountry: matched, playerIndex: resolvePlayerIndex(matched.isoA3) };
   };
 
   if (loading) {
@@ -220,16 +218,26 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
         {/* Map Countries */}
         <g>
           {countries.map((feat, idx) => {
-            const { dbCountry, isGuessed } = getCountryStatus(feat);
+            const { dbCountry, playerIndex } = getCountryStatus(feat);
             const pathData = pathGenerator(feat as unknown as GeoJSON.Feature) || '';
 
             if (!pathData) return null;
+
+            const isGuessed = playerIndex !== null;
+            const playerColor = isGuessed ? (playerMapColors[playerIndex! % playerMapColors.length] ?? '#10b981') : null;
 
             return (
               <path
                 key={feat.id || idx}
                 d={pathData}
                 className={`map-country ${isGuessed ? 'guessed' : ''}`}
+                style={playerColor ? {
+                  fill: playerColor,
+                  fillOpacity: 0.75,
+                  stroke: playerColor,
+                  strokeWidth: 0.8,
+                  filter: `drop-shadow(0 0 3px ${playerColor}88)`,
+                } : undefined}
                 onClick={() => {
                   if (onCountryClick && dbCountry) {
                     onCountryClick(dbCountry.name);

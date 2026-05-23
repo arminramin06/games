@@ -17,12 +17,12 @@ type GameOverReason = 'timer' | 'double_fail' | 'all_named';
 
 // 6 distinct neon colors cycling by player index
 const PLAYER_COLORS = [
-  { bg: 'rgba(99, 102, 241, 0.15)',  border: 'rgba(99, 102, 241, 0.3)',  text: '#818cf8', score: 'var(--neon-indigo)' },
-  { bg: 'rgba(6, 182, 212, 0.15)',   border: 'rgba(6, 182, 212, 0.3)',   text: '#22d3ee', score: 'var(--neon-cyan)'   },
-  { bg: 'rgba(251, 191, 36, 0.15)',  border: 'rgba(251, 191, 36, 0.3)',  text: '#fbbf24', score: '#fbbf24'            },
-  { bg: 'rgba(52, 211, 153, 0.15)',  border: 'rgba(52, 211, 153, 0.3)',  text: '#34d399', score: '#34d399'            },
-  { bg: 'rgba(244, 114, 182, 0.15)', border: 'rgba(244, 114, 182, 0.3)', text: '#f472b6', score: '#f472b6'            },
-  { bg: 'rgba(251, 146, 60, 0.15)',  border: 'rgba(251, 146, 60, 0.3)',  text: '#fb923c', score: '#fb923c'            },
+  { bg: 'rgba(99, 102, 241, 0.15)',  border: 'rgba(99, 102, 241, 0.3)',  text: '#818cf8', score: 'var(--neon-indigo)', mapFill: '#818cf8' },
+  { bg: 'rgba(6, 182, 212, 0.15)',   border: 'rgba(6, 182, 212, 0.3)',   text: '#22d3ee', score: 'var(--neon-cyan)',   mapFill: '#22d3ee' },
+  { bg: 'rgba(251, 191, 36, 0.15)',  border: 'rgba(251, 191, 36, 0.3)',  text: '#fbbf24', score: '#fbbf24',            mapFill: '#fbbf24' },
+  { bg: 'rgba(52, 211, 153, 0.15)',  border: 'rgba(52, 211, 153, 0.3)',  text: '#34d399', score: '#34d399',            mapFill: '#34d399' },
+  { bg: 'rgba(244, 114, 182, 0.15)', border: 'rgba(244, 114, 182, 0.3)', text: '#f472b6', score: '#f472b6',            mapFill: '#f472b6' },
+  { bg: 'rgba(251, 146, 60, 0.15)',  border: 'rgba(251, 146, 60, 0.3)',  text: '#fb923c', score: '#fb923c',            mapFill: '#fb923c' },
 ];
 
 export default function App() {
@@ -34,7 +34,8 @@ export default function App() {
   const [activeIndex, setActiveIndex] = useState(0);
 
   // Game Logic
-  const [guessedCountries, setGuessedCountries] = useState<Set<string>>(new Set());
+  // guessedCountries: Map<isoA3, playerIndex> — tracks who discovered each country
+  const [guessedCountries, setGuessedCountries] = useState<Map<string, number>>(new Map());
   const [guessedNames, setGuessedNames] = useState<string[]>([]);
   const [currentGuess, setCurrentGuess] = useState('');
   const [gameMessage, setGameMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' | null }>({ text: '', type: null });
@@ -116,7 +117,7 @@ export default function App() {
     setPlayers(playerNames);
     setScores(new Array(playerNames.length).fill(0));
     setActiveIndex(0);
-    setGuessedCountries(new Set());
+    setGuessedCountries(new Map());
     setGuessedNames([]);
     setCurrentGuess('');
     setGameMessage({ text: 'Game Started! Type or say a country name.', type: 'info' });
@@ -314,7 +315,7 @@ export default function App() {
       } else {
         setGameMessage({ text: `🏳️ ${currentPlayerName} skipped! (${failStreak}/2 misses)`, type: 'error' });
         setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-        const nextContinent = pickNextContinent(guessedCountries, currentContinentRef.current);
+        const nextContinent = pickNextContinent(new Set(guessedCountries.keys()), currentContinentRef.current);
         setCurrentContinent(nextContinent);
         currentContinentRef.current = nextContinent;
         setActiveIndex(nextIdx);
@@ -370,7 +371,7 @@ export default function App() {
       }
       setGameMessage({ text: `${msg} (${failStreak}/2 misses)`, type: 'error' });
       setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-      handleTurnChange(nextIdx, guessedCountries);
+      handleTurnChange(nextIdx, new Set(guessedCountries.keys()));
       return false;
     };
 
@@ -400,8 +401,8 @@ export default function App() {
         consecutiveFailsRef.current[currentIdx] = 0;
         setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = 0; return next; });
 
-        const nextGuessed = new Set(guessedCountries);
-        nextGuessed.add(matched.isoA3);
+        const nextGuessed = new Map(guessedCountries);
+        nextGuessed.set(matched.isoA3, currentIdx);
         setGuessedCountries(nextGuessed);
         setGuessedNames(prev => [matched.name, ...prev]);
 
@@ -430,7 +431,7 @@ export default function App() {
           setTimeout(() => handleEndGame('all_named'), 2000);
         } else {
           setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
-          handleTurnChange(nextIdx, nextGuessed);
+          handleTurnChange(nextIdx, new Set(nextGuessed.keys()));
         }
       }
     }
@@ -606,7 +607,7 @@ export default function App() {
                 <Globe size={14} style={{ color: 'var(--neon-cyan)' }} /> Continent Progress
               </h3>
               {(() => {
-                const stats = getContinentStats(guessedCountries);
+                const stats = getContinentStats(new Set(guessedCountries.keys()));
                 return ALL_CONTINENTS.map(continent => {
                   const { named, total } = stats[continent];
                   const pct = total > 0 ? (named / total) * 100 : 0;
@@ -853,7 +854,8 @@ export default function App() {
               )}
 
               <WorldMap
-                guessedIsoCodes={guessedCountries}
+                guessedCountriesMap={guessedCountries}
+                playerMapColors={PLAYER_COLORS.map(c => c.mapFill)}
                 showFailureCross={showCross}
                 onCountryClick={(name) => setCurrentGuess(name)}
               />
