@@ -55,6 +55,12 @@ export default function App() {
   const [speechRate, setSpeechRate] = useState(1.0);
 
   const recognitionRef = useRef<any>(null);
+  // Always-current ref for activeIndex — prevents stale closure bugs in speech callbacks
+  const activeIndexRef = useRef(activeIndex);
+  useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
+
+  // Always-current ref for processGuess — the speech onresult calls this so it never uses a stale version
+  const processGuessRef = useRef<(query: string) => void>(() => {});
 
   // Flag Overlay State
   const [activeFlag, setActiveFlag] = useState<{ name: string; url: string; fadeOut: boolean } | null>(null);
@@ -128,22 +134,24 @@ export default function App() {
             setGameMessage({ text: '⚠️ Could not understand. Try speaking again!', type: 'error' });
           }
         };
-        rec.onresult = (event: any) =>
+        rec.onresult = (event: any) => {
           // In continuous mode, results accumulate — always read the latest entry
-          {
           const lastResult = event.results[event.results.length - 1];
           if (lastResult && lastResult.isFinal) {
             const spokenText = lastResult[0].transcript.trim();
             if (spokenText) {
               setGameMessage({ text: `🎤 Heard: "${spokenText}"`, type: 'info' });
-              processGuess(spokenText);
+              // Call via ref so we always use the CURRENT processGuess (never stale)
+              processGuessRef.current(spokenText);
             }
           }
         };
         recognitionRef.current = rec;
       }
     }
-  }, [announcerEnabled, speechPitch, speechRate, players, activeIndex]);
+  // Only recreate on mount — activeIndex is handled via activeIndexRef
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Microphone toggle button click handler
   const toggleListening = () => {
@@ -217,13 +225,17 @@ export default function App() {
   };
 
   // Process a Guess (keyboard submit or speech recognition)
+  // NOTE: Keep this before the processGuessRef assignment below
   const processGuess = (query: string) => {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return;
 
+    // Read current index from ref — guaranteed fresh even in stale speech recognition callbacks
+    const currentIdx = activeIndexRef.current;
     const matched = findCountry(trimmedQuery);
-    const nextIdx = (activeIndex + 1) % players.length;
+    const nextIdx = (currentIdx + 1) % players.length;
     const nextPlayerName = players[nextIdx];
+    const currentPlayerName = players[currentIdx] ?? '';
 
     const triggerTurnAnnouncement = () => {
       if (announcerEnabled) {
@@ -235,7 +247,7 @@ export default function App() {
       playFailure();
       setShowCross(true);
       setShakeMap(true);
-      setGameMessage({ text: `${activeName} guessed "${trimmedQuery}" - Country not found!`, type: 'error' });
+      setGameMessage({ text: `${currentPlayerName} guessed "${trimmedQuery}" - Country not found!`, type: 'error' });
       setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
       setActiveIndex(nextIdx);
       triggerTurnAnnouncement();
@@ -256,7 +268,7 @@ export default function App() {
       setGuessedNames(prev => [matched.name, ...prev]);
 
       // Confetti origin spread across players evenly
-      const xOrigin = players.length === 1 ? 0.5 : activeIndex / (players.length - 1);
+      const xOrigin = players.length === 1 ? 0.5 : currentIdx / (players.length - 1);
       confetti({
         particleCount: 30,
         angle: 60 + (xOrigin * 60),
@@ -264,22 +276,26 @@ export default function App() {
         origin: { x: Math.max(0.1, Math.min(0.9, xOrigin)), y: 0.2 }
       });
 
+      // Award point to the CURRENT player using ref index (never stale)
       setScores(prev => {
         const next = [...prev];
-        next[activeIndex] = (next[activeIndex] ?? 0) + 1;
+        next[currentIdx] = (next[currentIdx] ?? 0) + 1;
         return next;
       });
 
       const flagUrl = getCountryFlagUrl(matched.isoA3);
       if (flagUrl) setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
 
-      setGameMessage({ text: `🎉 ${activeName} found ${matched.name}! (+1 pt)`, type: 'success' });
+      setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
       setActiveIndex(nextIdx);
       triggerTurnAnnouncement();
     }
 
     setCurrentGuess('');
   };
+
+  // Keep processGuessRef always pointing to the latest version of processGuess
+  processGuessRef.current = processGuess;
 
   const handleGuessSubmit = (e: React.FormEvent) => {
     e.preventDefault();
