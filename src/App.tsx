@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
-import { Trophy, HelpCircle, User, Zap, AlertTriangle, ArrowRight, Play, RotateCcw, Volume2, Mic, MicOff, Sliders } from 'lucide-react';
+import { Trophy, HelpCircle, User, Zap, AlertTriangle, ArrowRight, Play, RotateCcw, Volume2, Mic, MicOff, Sliders, Skull } from 'lucide-react';
 import PlayerSetup from './components/PlayerSetup';
 import WorldMap from './components/WorldMap';
 import Leaderboard from './components/Leaderboard';
-import { findCountry, getCountryFlagUrl } from './utils/countries';
+import { findCountry, getCountryFlagUrl, countriesDatabase } from './utils/countries';
 import { playSuccess, playFailure, playWinner } from './utils/audio';
 import { isSpeechRecognitionSupported, createSpeechRecognitionInstance, announceTurn } from './utils/speech';
 
 type GamePhase = 'setup' | 'active' | 'gameover';
+type GameOverReason = 'timer' | 'double_fail' | 'all_named';
 
 // 6 distinct neon colors cycling by player index
 const PLAYER_COLORS = [
@@ -45,6 +46,10 @@ export default function App() {
   // DB Sync Trigger
   const [dbRefresh, setDbRefresh] = useState(0);
 
+  // Game Over Reason — drives banner on game-over screen
+  const [gameOverReason, setGameOverReason] = useState<GameOverReason>('timer');
+  const [eliminatedPlayer, setEliminatedPlayer] = useState<string>('');
+
   // Sound warm up notice
   const [audioWarmed, setAudioWarmed] = useState(false);
 
@@ -58,6 +63,11 @@ export default function App() {
   // Always-current ref for activeIndex — prevents stale closure bugs in speech callbacks
   const activeIndexRef = useRef(activeIndex);
   useEffect(() => { activeIndexRef.current = activeIndex; }, [activeIndex]);
+
+  // Per-player consecutive wrong-guess streak
+  // ref = never stale inside processGuess; state = triggers re-render for the warning badge UI
+  const consecutiveFailsRef = useRef<number[]>([]);
+  const [missStreaks, setMissStreaks] = useState<number[]>([]);
 
   // Always-current ref for processGuess — the speech onresult calls this so it never uses a stale version
   const processGuessRef = useRef<(query: string) => void>(() => {});
@@ -83,6 +93,10 @@ export default function App() {
     setCurrentGuess('');
     setGameMessage({ text: 'Game Started! Type or say a country name.', type: 'info' });
     setTimeLeft(90);
+    setGameOverReason('timer');
+    setEliminatedPlayer('');
+    consecutiveFailsRef.current = new Array(playerNames.length).fill(0);
+    setMissStreaks(new Array(playerNames.length).fill(0));
     setPhase('active');
 
     // Warm up Web Audio API
@@ -191,9 +205,14 @@ export default function App() {
   }, [phase]);
 
   // Handle Game End & record in SQLite
-  const handleEndGame = async () => {
+  // reason: why the game ended (for display on game-over screen)
+  const handleEndGame = async (reason: GameOverReason = 'timer') => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setGameOverReason(reason);
     setPhase('gameover');
+
+    // Stop mic if running
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
 
     // Use latest scores from state via functional update pattern
     setScores(currentScores => {
@@ -244,23 +263,53 @@ export default function App() {
     };
 
     if (!matched) {
+      // ── Wrong guess: country not recognised ──────────────────────────
       playFailure();
       setShowCross(true);
       setShakeMap(true);
-      setGameMessage({ text: `${currentPlayerName} guessed "${trimmedQuery}" - Country not found!`, type: 'error' });
-      setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-      setActiveIndex(nextIdx);
-      triggerTurnAnnouncement();
+      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
+      const failStreak = consecutiveFailsRef.current[currentIdx];
+      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+
+      if (failStreak >= 2) {
+        // ❌❌ Double-fail elimination
+        setGameMessage({ text: `💀 ${currentPlayerName} missed twice in a row! Game over!`, type: 'error' });
+        setEliminatedPlayer(currentPlayerName);
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setTimeout(() => handleEndGame('double_fail'), 1800);
+      } else {
+        setGameMessage({ text: `${currentPlayerName} guessed "${trimmedQuery}" — not found! (${failStreak}/2 misses)`, type: 'error' });
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setActiveIndex(nextIdx);
+        triggerTurnAnnouncement();
+      }
     } else if (guessedCountries.has(matched.isoA3)) {
+      // ── Already guessed ──────────────────────────────────────────────
       playFailure();
       setShowCross(true);
       setShakeMap(true);
-      setGameMessage({ text: `"${matched.name}" has already been guessed!`, type: 'error' });
-      setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
-      setActiveIndex(nextIdx);
-      triggerTurnAnnouncement();
+      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
+      const failStreak = consecutiveFailsRef.current[currentIdx];
+      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+
+      if (failStreak >= 2) {
+        setGameMessage({ text: `💀 ${currentPlayerName} missed twice in a row! Game over!`, type: 'error' });
+        setEliminatedPlayer(currentPlayerName);
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setTimeout(() => handleEndGame('double_fail'), 1800);
+      } else {
+        setGameMessage({ text: `"${matched.name}" already guessed! (${failStreak}/2 misses for ${currentPlayerName})`, type: 'error' });
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setActiveIndex(nextIdx);
+        triggerTurnAnnouncement();
+      }
     } else {
+      // ── Correct guess ────────────────────────────────────────────────
       playSuccess();
+
+      // Reset this player's fail streak
+      consecutiveFailsRef.current[currentIdx] = 0;
+      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = 0; return next; });
 
       const nextGuessed = new Set(guessedCountries);
       nextGuessed.add(matched.isoA3);
@@ -286,9 +335,15 @@ export default function App() {
       const flagUrl = getCountryFlagUrl(matched.isoA3);
       if (flagUrl) setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
 
-      setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
-      setActiveIndex(nextIdx);
-      triggerTurnAnnouncement();
+      // Check win condition 2: all countries named
+      if (nextGuessed.size >= countriesDatabase.length) {
+        setGameMessage({ text: `🌍 ${currentPlayerName} named the last country! All ${countriesDatabase.length} countries discovered!`, type: 'success' });
+        setTimeout(() => handleEndGame('all_named'), 2000);
+      } else {
+        setGameMessage({ text: `🎉 ${currentPlayerName} found ${matched.name}! (+1 pt)`, type: 'success' });
+        setActiveIndex(nextIdx);
+        triggerTurnAnnouncement();
+      }
     }
 
     setCurrentGuess('');
@@ -415,6 +470,15 @@ export default function App() {
                         <span style={{ fontSize: '10px', color: isActive ? 'var(--neon-cyan)' : 'var(--text-muted)' }}>
                           {isActive ? 'Active Turn' : 'Waiting...'}
                         </span>
+                        {/* Miss streak warning — uses missStreaks state (not ref) to trigger re-render */}
+                        {(missStreaks[idx] ?? 0) >= 1 && (
+                          <span style={{
+                            display: 'block', fontSize: '9px', fontWeight: 700,
+                            color: 'var(--neon-amber)', letterSpacing: '0.03em', marginTop: '1px'
+                          }}>
+                            ⚠️ 1 miss — one more = out!
+                          </span>
+                        )}
                       </div>
                     </div>
                     <span style={{ fontSize: '22px', fontWeight: 800, color: color.score }}>
@@ -666,29 +730,58 @@ export default function App() {
               display: 'flex', flexDirection: 'column', alignItems: 'center',
               justifyContent: 'center', position: 'relative', overflow: 'hidden'
             }}>
+              {/* Dynamic glow based on reason */}
               <div style={{
                 position: 'absolute', top: '50%', left: '50%',
                 transform: 'translate(-50%, -50%)',
                 width: '300px', height: '300px', borderRadius: '50%',
-                background: 'var(--neon-green-glow)', filter: 'blur(100px)',
-                zIndex: 0, opacity: 0.6
+                background: gameOverReason === 'double_fail' ? 'rgba(239, 68, 68, 0.4)' : 'var(--neon-green-glow)',
+                filter: 'blur(100px)', zIndex: 0, opacity: 0.6
               }} />
 
               <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
+
+                {/* Icon — changes by reason */}
                 <div style={{
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                   width: '96px', height: '96px', borderRadius: '24px',
-                  background: 'rgba(16, 185, 129, 0.15)', border: '1px solid rgba(16, 185, 129, 0.3)',
-                  marginBottom: '24px', color: 'var(--neon-green)',
-                  filter: 'drop-shadow(0 0 15px var(--neon-green-glow))',
+                  background: gameOverReason === 'double_fail'
+                    ? 'rgba(239, 68, 68, 0.15)'
+                    : gameOverReason === 'all_named'
+                      ? 'rgba(6, 182, 212, 0.15)'
+                      : 'rgba(16, 185, 129, 0.15)',
+                  border: `1px solid ${gameOverReason === 'double_fail' ? 'rgba(239,68,68,0.3)' : gameOverReason === 'all_named' ? 'rgba(6,182,212,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                  marginBottom: '24px',
+                  color: gameOverReason === 'double_fail' ? 'var(--neon-red)' : gameOverReason === 'all_named' ? 'var(--neon-cyan)' : 'var(--neon-green)',
                   animation: 'neonPulse 2s infinite ease-in-out'
                 }}>
-                  <Trophy size={48} />
+                  {gameOverReason === 'double_fail' ? <Skull size={48} /> : gameOverReason === 'all_named' ? <span style={{ fontSize: '48px' }}>🌍</span> : <Trophy size={48} />}
+                </div>
+
+                {/* Game-over reason banner */}
+                <div style={{
+                  marginBottom: '12px',
+                  padding: '6px 18px',
+                  borderRadius: '9999px',
+                  fontSize: '12px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase',
+                  background: gameOverReason === 'double_fail'
+                    ? 'rgba(239,68,68,0.12)' : gameOverReason === 'all_named'
+                    ? 'rgba(6,182,212,0.12)' : 'rgba(16,185,129,0.12)',
+                  border: `1px solid ${gameOverReason === 'double_fail' ? 'rgba(239,68,68,0.3)' : gameOverReason === 'all_named' ? 'rgba(6,182,212,0.3)' : 'rgba(16,185,129,0.3)'}`,
+                  color: gameOverReason === 'double_fail' ? 'var(--neon-red)' : gameOverReason === 'all_named' ? 'var(--neon-cyan)' : 'var(--neon-green)',
+                }}>
+                  {gameOverReason === 'double_fail'
+                    ? `💀 ${eliminatedPlayer} missed twice — eliminated!`
+                    : gameOverReason === 'all_named'
+                    ? `🌍 All ${countriesDatabase.length} countries discovered!`
+                    : '⏱️ Time\'s Up!'}
                 </div>
 
                 <h1 style={{
                   fontSize: '44px', fontWeight: 800, marginBottom: '8px',
-                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  background: gameOverReason === 'double_fail'
+                    ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)'
+                    : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                   WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
                   letterSpacing: '-0.03em'
                 }}>
