@@ -7,12 +7,18 @@ interface LeaderboardEntry {
   games_played: number;
 }
 
+interface PlayerResult {
+  name: string;
+  score: number;
+}
+
 interface MatchHistoryEntry {
   player1_name: string;
   player2_name: string;
   player1_score: number;
   player2_score: number;
   winner_name: string | null;
+  player_results: string | null; // JSON array for family games
   played_at: string;
 }
 
@@ -276,6 +282,19 @@ export default function Leaderboard({ refreshTrigger }: LeaderboardProps) {
                 minute: '2-digit'
               });
 
+              // Parse family game results if present
+              let familyResults: PlayerResult[] | null = null;
+              if (match.player_results) {
+                try {
+                  const parsed = JSON.parse(match.player_results);
+                  if (Array.isArray(parsed) && parsed.length > 2) {
+                    familyResults = [...parsed].sort((a: PlayerResult, b: PlayerResult) => b.score - a.score);
+                  }
+                } catch {
+                  // Ignore parse errors for legacy rows
+                }
+              }
+
               return (
                 <div
                   key={idx}
@@ -288,39 +307,59 @@ export default function Leaderboard({ refreshTrigger }: LeaderboardProps) {
                     borderRadius: '10px'
                   }}
                 >
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '14px'
-                  }}>
-                    <span style={{
-                      fontWeight: match.winner_name === match.player1_name ? 700 : 400,
-                      color: match.winner_name === match.player1_name ? 'var(--neon-green)' : 'var(--text-primary)'
-                    }}>
-                      {match.player1_name} ({match.player1_score})
-                    </span>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>VS</span>
-                    <span style={{
-                      fontWeight: match.winner_name === match.player2_name ? 700 : 400,
-                      color: match.winner_name === match.player2_name ? 'var(--neon-green)' : 'var(--text-primary)'
-                    }}>
-                      ({match.player2_score}) {match.player2_name}
-                    </span>
-                  </div>
-                  
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '11px',
-                    color: 'var(--text-muted)'
-                  }}>
-                    <span>
-                      {match.winner_name ? `Winner: ${match.winner_name}` : 'Tie Game'}
-                    </span>
-                    <span>{playedDate}</span>
-                  </div>
+                  {familyResults ? (
+                    // Family Game display
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                        <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--neon-green)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                          👨‍👩‍👧‍👦 Family Game ({familyResults.length} players)
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{playedDate}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                        {familyResults.map((pr, ri) => (
+                          <div key={pr.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
+                            <span style={{
+                              fontWeight: pr.name === match.winner_name ? 700 : 400,
+                              color: pr.name === match.winner_name ? 'var(--neon-green)' : 'var(--text-primary)'
+                            }}>
+                              {ri === 0 && match.winner_name === pr.name ? '🏆 ' : `#${ri + 1} `}{pr.name}
+                            </span>
+                            <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>{pr.score} pts</span>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    // Classic Duel display
+                    <>
+                      <div style={{
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', fontSize: '14px'
+                      }}>
+                        <span style={{
+                          fontWeight: match.winner_name === match.player1_name ? 700 : 400,
+                          color: match.winner_name === match.player1_name ? 'var(--neon-green)' : 'var(--text-primary)'
+                        }}>
+                          {match.player1_name} ({match.player1_score})
+                        </span>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>VS</span>
+                        <span style={{
+                          fontWeight: match.winner_name === match.player2_name ? 700 : 400,
+                          color: match.winner_name === match.player2_name ? 'var(--neon-green)' : 'var(--text-primary)'
+                        }}>
+                          ({match.player2_score}) {match.player2_name}
+                        </span>
+                      </div>
+                      <div style={{
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-muted)'
+                      }}>
+                        <span>{match.winner_name ? `Winner: ${match.winner_name}` : 'Tie Game'}</span>
+                        <span>{playedDate}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               );
             })

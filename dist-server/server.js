@@ -34,9 +34,18 @@ async function initDb() {
       player1_score INTEGER NOT NULL,
       player2_score INTEGER NOT NULL,
       winner_name TEXT,
+      player_results TEXT,
       played_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+    // Migration: add player_results column if it doesn't exist (for existing databases)
+    try {
+        await db.exec(`ALTER TABLE matches ADD COLUMN player_results TEXT`);
+        console.log('Migrated: added player_results column to matches table.');
+    }
+    catch {
+        // Column already exists — this is expected after first migration
+    }
     console.log('SQLite database initialized successfully.');
 }
 // Routes
@@ -79,20 +88,38 @@ app.post('/api/players', async (req, res) => {
     }
 });
 // Record a completed match and update player stats
+// Accepts both classic duel format and new family plan format
 app.post('/api/matches', async (req, res) => {
-    const { player1Name, player2Name, player1Score, player2Score, winnerName } = req.body;
-    if (!player1Name || !player2Name || player1Score === undefined || player2Score === undefined) {
-        return res.status(400).json({ error: 'Missing match details' });
-    }
+    const { player1Name, player2Name, player1Score, player2Score, winnerName, playerResults } = req.body;
     try {
-        // Record match in match history
-        await db.run(`INSERT INTO matches (player1_name, player2_name, player1_score, player2_score, winner_name) 
-       VALUES (?, ?, ?, ?, ?)`, [player1Name, player2Name, player1Score, player2Score, winnerName || null]);
-        // Update Player 1 stats
-        await updatePlayerStats(player1Name, player1Score);
-        // Update Player 2 stats
-        await updatePlayerStats(player2Name, player2Score);
-        res.json({ success: true, message: 'Match recorded successfully' });
+        if (playerResults && Array.isArray(playerResults) && playerResults.length >= 2) {
+            // --- Family Plan: multi-player match ---
+            // playerResults = [{name: string, score: number}, ...]
+            const sorted = [...playerResults].sort((a, b) => b.score - a.score);
+            const winner = sorted[0];
+            const actualWinner = sorted[1].score < winner.score ? winner.name : null; // null = tie at top
+            // Use first two entries for backward-compat columns
+            const p1 = sorted[0];
+            const p2 = sorted[1];
+            await db.run(`INSERT INTO matches (player1_name, player2_name, player1_score, player2_score, winner_name, player_results) 
+         VALUES (?, ?, ?, ?, ?, ?)`, [p1.name, p2.name, p1.score, p2.score, actualWinner, JSON.stringify(playerResults)]);
+            // Update stats for all players
+            for (const pr of playerResults) {
+                await updatePlayerStats(pr.name, pr.score);
+            }
+            res.json({ success: true, message: 'Family match recorded successfully' });
+        }
+        else {
+            // --- Classic Duel: 2-player match ---
+            if (!player1Name || !player2Name || player1Score === undefined || player2Score === undefined) {
+                return res.status(400).json({ error: 'Missing match details' });
+            }
+            await db.run(`INSERT INTO matches (player1_name, player2_name, player1_score, player2_score, winner_name) 
+         VALUES (?, ?, ?, ?, ?)`, [player1Name, player2Name, player1Score, player2Score, winnerName || null]);
+            await updatePlayerStats(player1Name, player1Score);
+            await updatePlayerStats(player2Name, player2Score);
+            res.json({ success: true, message: 'Match recorded successfully' });
+        }
     }
     catch (error) {
         console.error('Error recording match:', error);
@@ -102,7 +129,7 @@ app.post('/api/matches', async (req, res) => {
 // Fetch complete match history
 app.get('/api/matches', async (req, res) => {
     try {
-        const history = await db.all('SELECT player1_name, player2_name, player1_score, player2_score, winner_name, played_at FROM matches ORDER BY played_at DESC LIMIT 20');
+        const history = await db.all('SELECT player1_name, player2_name, player1_score, player2_score, winner_name, player_results, played_at FROM matches ORDER BY played_at DESC LIMIT 20');
         res.json(history);
     }
     catch (error) {
