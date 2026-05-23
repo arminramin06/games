@@ -128,11 +128,16 @@ export default function App() {
             setGameMessage({ text: '⚠️ Could not understand. Try speaking again!', type: 'error' });
           }
         };
-        rec.onresult = (event: any) => {
-          const spokenText = event.results[0][0].transcript;
-          if (spokenText) {
-            setGameMessage({ text: `🎤 Heard: "${spokenText}"`, type: 'info' });
-            processGuess(spokenText);
+        rec.onresult = (event: any) =>
+          // In continuous mode, results accumulate — always read the latest entry
+          {
+          const lastResult = event.results[event.results.length - 1];
+          if (lastResult && lastResult.isFinal) {
+            const spokenText = lastResult[0].transcript.trim();
+            if (spokenText) {
+              setGameMessage({ text: `🎤 Heard: "${spokenText}"`, type: 'info' });
+              processGuess(spokenText);
+            }
           }
         };
         recognitionRef.current = rec;
@@ -526,7 +531,7 @@ export default function App() {
                     type="button"
                     onClick={toggleListening}
                     className={`mic-btn ${isListening ? 'mic-active' : ''}`}
-                    title={isListening ? 'Stop listening' : 'Say it instead of typing!'}
+                    title={isListening ? '🔴 Mic is ON — click to stop' : '🎙️ Click to start hands-free mode'}
                     style={{ flexShrink: 0 }}
                   >
                     {isListening ? <MicOff size={20} /> : <Mic size={20} />}

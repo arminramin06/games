@@ -342,15 +342,14 @@ h1, h2, h3, h4, h5, h6 {
 
 /* Flag Card Visual Overlay Styles */
 @keyframes flagPop {
-  0% { transform: translate(-50%, -20px) scale(0.85); opacity: 0; }
-  100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+  0% { transform: translateX(-50%) translateY(-20px) scale(0.85); opacity: 0; }
+  100% { transform: translateX(-50%) translateY(0) scale(1); opacity: 1; }
 }
 
 .flag-overlay-container {
   position: absolute;
   top: 24px;
   left: 50%;
-  transform: translateX(-50%);
   z-index: 20;
   pointer-events: auto;
 }
@@ -369,11 +368,12 @@ h1, h2, h3, h4, h5, h6 {
   box-shadow: 0 10px 30px rgba(6, 182, 212, 0.15), var(--card-shadow);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  transform: translateX(-50%);
 }
 
 .flag-card-fadeout {
   opacity: 0 !important;
-  transform: translate(-50%, -15px) scale(0.9) !important;
+  transform: translateX(-50%) translateY(-15px) scale(0.9) !important;
   pointer-events: none;
 }
 

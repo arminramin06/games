@@ -26,7 +26,7 @@ export function createSpeechRecognitionInstance() {
   if (!RecognitionClass) return null;
   
   const rec = new RecognitionClass();
-  rec.continuous = false;
+  rec.continuous = true;   // Keep listening after each result
   rec.interimResults = false;
   rec.lang = 'en-US';
   return rec;
