@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { User, Sparkles, Trophy, Users, Swords, Plus, Minus } from 'lucide-react';
 
 type GameMode = 'duel' | 'family';
@@ -24,6 +24,14 @@ export default function PlayerSetup({ onStartGame }: PlayerSetupProps) {
   const [player1, setPlayer1] = useState('');
   const [player2, setPlayer2] = useState('');
   const [step, setStep] = useState(1);
+
+  // Ref to imperatively focus the active input whenever mode/step changes
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // Small delay so the element is visible/rendered before we focus
+    const t = setTimeout(() => inputRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, [mode, step]);
 
   // Family mode state
   const [familyPlayers, setFamilyPlayers] = useState<string[]>(['', '', '']);
@@ -286,12 +294,12 @@ export default function PlayerSetup({ onStartGame }: PlayerSetupProps) {
                   {step === 1 ? 'Player 1 Name' : 'Player 2 Name'}
                 </label>
                 <input
+                  ref={inputRef}
                   type="text"
                   className="glass-input"
                   placeholder={step === 1 ? 'Enter name (e.g. Leo)' : 'Enter name (e.g. Mia)'}
                   value={step === 1 ? player1 : player2}
                   onChange={(e) => step === 1 ? setPlayer1(e.target.value) : setPlayer2(e.target.value)}
-                  autoFocus
                   maxLength={15}
                 />
               </div>
@@ -396,13 +404,13 @@ export default function PlayerSetup({ onStartGame }: PlayerSetupProps) {
                     {idx + 1}
                   </div>
                   <input
+                    ref={idx === 0 ? inputRef : undefined}
                     type="text"
                     className="glass-input"
                     placeholder={`Player ${idx + 1} name…`}
                     value={name}
                     onChange={(e) => updateFamilyPlayer(idx, e.target.value)}
                     maxLength={15}
-                    autoFocus={idx === 0}
                     style={{ flex: 1, borderColor: name.trim() ? color.border : undefined }}
                   />
                 </div>
