@@ -286,6 +286,48 @@ export default function App() {
     const trimmedQuery = query.trim();
     if (!trimmedQuery) return;
 
+    // ── Skip phrases: treat "I don't know", "pass", etc. as a miss ───────
+    const normalizedQuery = trimmedQuery.toLowerCase().replace(/['']/g, "'").replace(/[^a-z\s']/g, '').trim();
+    const SKIP_PHRASES = [
+      "i don't know", "i dont know", "don't know", "dont know",
+      "no idea", "i have no idea", "i don't have an idea",
+      "skip", "pass", "next", "i give up", "give up",
+      "no clue", "i have no clue", "not sure", "i'm not sure", "im not sure",
+      "i don't know this", "i dont know this",
+    ];
+    if (SKIP_PHRASES.includes(normalizedQuery)) {
+      // Treat as a wrong answer — reuse the miss/elimination logic below
+      const currentIdx = activeIndexRef.current;
+      const nextIdx = (currentIdx + 1) % players.length;
+      const currentPlayerName = players[currentIdx] ?? '';
+      playFailure();
+      setShowCross(true);
+      setShakeMap(true);
+      consecutiveFailsRef.current[currentIdx] = (consecutiveFailsRef.current[currentIdx] ?? 0) + 1;
+      const failStreak = consecutiveFailsRef.current[currentIdx];
+      setMissStreaks(prev => { const next = [...prev]; next[currentIdx] = failStreak; return next; });
+      if (failStreak >= 2) {
+        setGameMessage({ text: `💀 ${currentPlayerName} gave up twice in a row! Game over!`, type: 'error' });
+        setEliminatedPlayer(currentPlayerName);
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        setTimeout(() => handleEndGame('double_fail'), 1800);
+      } else {
+        setGameMessage({ text: `🏳️ ${currentPlayerName} skipped! (${failStreak}/2 misses)`, type: 'error' });
+        setTimeout(() => { setShowCross(false); setShakeMap(false); }, 1000);
+        const nextContinent = pickNextContinent(guessedCountries, currentContinentRef.current);
+        setCurrentContinent(nextContinent);
+        currentContinentRef.current = nextContinent;
+        setActiveIndex(nextIdx);
+        if (announcerEnabled) {
+          setTimeout(() => {
+            if (gamePhaseRef.current === 'active') announceTurn(players[nextIdx], nextContinent, speechPitch, speechRate);
+          }, 1100);
+        }
+      }
+      setCurrentGuess('');
+      return;
+    }
+
     // Read current index from ref — guaranteed fresh even in stale speech recognition callbacks
     const currentIdx = activeIndexRef.current;
     const matched = findCountry(trimmedQuery);
