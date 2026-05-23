@@ -578,13 +578,69 @@ export default function App() {
               )}
             </div>
 
-            {/* Interactive World Map */}
-            <div className={shakeMap ? 'shake-animation' : ''} style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {/* Interactive World Map — wrapper is position:relative so the flag overlay is positioned here, NOT inside WorldMap which has overflow:hidden */}
+            <div
+              className={shakeMap ? 'shake-animation' : ''}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}
+            >
+              {/* Flag overlay — rendered here to avoid WorldMap overflow:hidden clipping */}
+              {activeFlag && (
+                <div style={{
+                  position: 'absolute',
+                  top: '20px',
+                  left: '50%',
+                  zIndex: 30,
+                  pointerEvents: 'none',
+                  transition: 'opacity 0.4s ease, transform 0.4s ease',
+                  opacity: activeFlag.fadeOut ? 0 : 1,
+                  transform: activeFlag.fadeOut
+                    ? 'translateX(-50%) translateY(-12px) scale(0.92)'
+                    : 'translateX(-50%) translateY(0) scale(1)',
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '10px',
+                    padding: '14px 22px',
+                    background: 'rgba(10, 12, 28, 0.92)',
+                    border: '1.5px solid rgba(6, 182, 212, 0.5)',
+                    borderRadius: '16px',
+                    boxShadow: '0 10px 30px rgba(6, 182, 212, 0.2), 0 4px 16px rgba(0,0,0,0.6)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    animation: activeFlag.fadeOut ? 'none' : 'flagPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+                  }}>
+                    <img
+                      src={activeFlag.url}
+                      alt={`${activeFlag.name} flag`}
+                      style={{
+                        width: '140px',
+                        height: '85px',
+                        objectFit: 'cover',
+                        borderRadius: '6px',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+                      }}
+                    />
+                    <div style={{
+                      fontFamily: 'var(--font-display)',
+                      fontSize: '15px',
+                      fontWeight: 700,
+                      color: 'var(--text-primary)',
+                      textAlign: 'center',
+                      letterSpacing: '0.02em',
+                    }}>
+                      {activeFlag.name}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <WorldMap
                 guessedIsoCodes={guessedCountries}
                 showFailureCross={showCross}
                 onCountryClick={(name) => setCurrentGuess(name)}
-                activeFlag={activeFlag}
               />
             </div>
 

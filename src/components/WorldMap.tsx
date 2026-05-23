@@ -8,7 +8,6 @@ interface WorldMapProps {
   guessedIsoCodes: Set<string>;
   showFailureCross: boolean;
   onCountryClick?: (countryName: string) => void;
-  activeFlag: { name: string; url: string; fadeOut: boolean } | null;
 }
 
 interface MapFeature {
@@ -20,7 +19,7 @@ interface MapFeature {
   geometry: GeoJSON.Geometry;
 }
 
-export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryClick, activeFlag }: WorldMapProps) {
+export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryClick }: WorldMapProps) {
   const [countries, setCountries] = useState<MapFeature[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -170,16 +169,6 @@ export default function WorldMap({ guessedIsoCodes, showFailureCross, onCountryC
       justifyContent: 'center',
       minHeight: '350px'
     }}>
-      {/* Dynamic flag overlay card */}
-      {activeFlag && (
-        <div className="flag-overlay-container">
-          <div className={`flag-card-anim ${activeFlag.fadeOut ? 'flag-card-fadeout' : ''}`}>
-            <img src={activeFlag.url} alt={`${activeFlag.name} Flag`} className="flag-img" />
-            <div className="flag-title">{activeFlag.name}</div>
-          </div>
-        </div>
-      )}
-
       {/* Dynamic failure cross animation over the map */}
       {showFailureCross && (
         <div style={{
