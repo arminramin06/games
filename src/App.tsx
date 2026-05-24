@@ -190,10 +190,15 @@ export default function App() {
           // In continuous mode, results accumulate — always read the latest entry
           const lastResult = event.results[event.results.length - 1];
           if (lastResult && lastResult.isFinal) {
+            const confidence = lastResult[0].confidence ?? 1;
             const spokenText = lastResult[0].transcript.trim();
             if (spokenText) {
+              // Low confidence = recognizer wasn't sure — don't count as a miss
+              if (confidence < 0.45) {
+                speakSorry();
+                return;
+              }
               setGameMessage({ text: `🎤 Heard: "${spokenText}"`, type: 'info' });
-              // Call via ref so we always use the CURRENT processGuess (never stale)
               processGuessRef.current(spokenText);
             }
           }
@@ -235,12 +240,26 @@ export default function App() {
       rec.onerror = () => { setPttActive(false); };
       rec.onend = () => {
         setPttActive(false);
-        // After recognition ends, submit whatever is in the input
-        // Use a tiny delay so React state (currentGuess) has settled
+        // After recognition ends, check the transcript before submitting
         setTimeout(() => {
           const inputEl = document.querySelector<HTMLInputElement>('input.glass-input');
           const val = inputEl?.value.trim();
-          if (val) processGuessRef.current(val);
+          if (!val) return;
+
+          // If voice produced text that matches nothing (garbled noise), say sorry
+          // Skip phrases are still forwarded normally so they count as a miss
+          const normalizedVal = val.toLowerCase().replace(/['']/g, "'").replace(/[^a-z\s']/g, '').trim();
+          const VOICE_SKIP = ["i don't know","i dont know","don't know","dont know","no idea","i have no idea","skip","pass","next","i give up","give up","no clue","not sure","i'm not sure","im not sure"];
+          const isSkip = VOICE_SKIP.includes(normalizedVal);
+          const isCountry = findCountry(val) !== null;
+
+          if (!isSkip && !isCountry) {
+            // Recognizer heard something but it doesn't match any country — don't penalise
+            speakSorry();
+            setCurrentGuess('');
+            return;
+          }
+          processGuessRef.current(val);
         }, 80);
       };
       pttRecognitionRef.current = rec;
@@ -267,6 +286,17 @@ export default function App() {
   // Re-register if speech support changes; processGuessRef is a ref so it never changes
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── speakSorry: TTS helper for unrecognised voice input ────────────────────
+  const speakSorry = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utter = new SpeechSynthesisUtterance("Sorry, I didn't understand. Please try again.");
+    utter.pitch = speechPitch;
+    utter.rate = speechRate;
+    window.speechSynthesis.speak(utter);
+    setGameMessage({ text: "Sorry, I didn't understand. Please try again.", type: 'info' });
+  };
 
   // Microphone toggle button click handler
   const toggleListening = () => {
@@ -863,6 +893,36 @@ export default function App() {
                     SPEAKING… Release SPACE to submit
                   </span>
                 </div>
+              ) : activeFlag ? (
+                // Flag strip — compact inline banner, no overlap with sidebar or map
+                <div style={{
+                  marginTop: '10px', display: 'flex', alignItems: 'center', gap: '10px',
+                  padding: '6px 12px', borderRadius: '10px',
+                  background: 'rgba(6, 182, 212, 0.07)',
+                  border: '1px solid rgba(6, 182, 212, 0.3)',
+                  opacity: activeFlag.fadeOut ? 0 : 1,
+                  transition: 'opacity 0.4s ease',
+                  animation: activeFlag.fadeOut ? 'none' : 'flagPop 0.3s ease forwards',
+                }}>
+                  <img
+                    src={activeFlag.url}
+                    alt={`${activeFlag.name} flag`}
+                    style={{
+                      width: '56px', height: '36px',
+                      objectFit: 'cover', borderRadius: '4px',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '9px', color: 'var(--neon-cyan)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                      🎉 Discovered!
+                    </div>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: '#fff' }}>
+                      {activeFlag.name}
+                    </div>
+                  </div>
+                </div>
               ) : (
                 gameMessage.text && (
                   <div style={{
@@ -901,53 +961,6 @@ export default function App() {
               className={shakeMap ? 'shake-animation' : ''}
               style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}
             >
-              {/* Flag overlay — left side of map, outside WorldMap overflow:hidden */}
-              {activeFlag && (
-                <div style={{
-                  position: 'absolute',
-                  top: '16px',
-                  left: '16px',
-                  zIndex: 30,
-                  pointerEvents: 'none',
-                  opacity: activeFlag.fadeOut ? 0 : 1,
-                  transform: activeFlag.fadeOut ? 'translateY(-8px) scale(0.93)' : 'translateY(0) scale(1)',
-                  transition: 'opacity 0.4s ease, transform 0.4s ease',
-                  animation: activeFlag.fadeOut ? 'none' : 'flagPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-                }}>
-                  <div style={{
-                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px',
-                    padding: '12px 14px',
-                    background: 'rgba(10, 12, 28, 0.88)',
-                    border: '1.5px solid rgba(6, 182, 212, 0.45)',
-                    borderRadius: '14px',
-                    boxShadow: '0 8px 24px rgba(6, 182, 212, 0.15), 0 4px 16px rgba(0,0,0,0.6)',
-                    backdropFilter: 'blur(16px)',
-                    WebkitBackdropFilter: 'blur(16px)',
-                    minWidth: '150px',
-                  }}>
-                    <div style={{ fontSize: '9px', color: 'var(--neon-cyan)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                      🎉 Just Discovered!
-                    </div>
-                    <img
-                      src={activeFlag.url}
-                      alt={`${activeFlag.name} flag`}
-                      style={{
-                        width: '150px', height: '90px',
-                        objectFit: 'cover', borderRadius: '8px',
-                        border: '1px solid rgba(255,255,255,0.15)',
-                        boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
-                      }}
-                    />
-                    <div style={{
-                      fontSize: '13px', fontWeight: 700, color: '#ffffff',
-                      letterSpacing: '0.02em', textAlign: 'left',
-                    }}>
-                      {activeFlag.name}
-                    </div>
-                  </div>
-                </div>
-              )}
-
               <WorldMap
                 guessedCountriesMap={guessedCountries}
                 playerMapColors={PLAYER_COLORS.map(c => c.mapFill)}
