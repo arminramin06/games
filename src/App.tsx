@@ -71,7 +71,8 @@ export default function App() {
 
   // Push-to-talk state
   const [pttActive, setPttActive] = useState(false);
-  const pttRecognitionRef = useRef<any>(null); // separate instance for PTT
+  const pttRecognitionRef = useRef<any>(null);   // separate instance for PTT
+  const pttTranscriptRef = useRef('');            // stores PTT transcript synchronously (avoids DOM race)
 
   const recognitionRef = useRef<any>(null);
   // Always-current ref for activeIndex — prevents stale closure bugs in speech callbacks
@@ -235,32 +236,29 @@ export default function App() {
       rec.onresult = (event: any) => {
         const result = event.results[event.results.length - 1];
         const transcript = result[0].transcript.trim();
-        if (transcript) setCurrentGuess(transcript);
+        if (transcript) {
+          pttTranscriptRef.current = transcript; // store synchronously — avoids DOM race in onend
+          setCurrentGuess(transcript);           // update UI display
+        }
       };
-      rec.onerror = () => { setPttActive(false); };
+      rec.onerror = () => { setPttActive(false); pttTranscriptRef.current = ''; };
       rec.onend = () => {
         setPttActive(false);
-        // After recognition ends, check the transcript before submitting
-        setTimeout(() => {
-          const inputEl = document.querySelector<HTMLInputElement>('input.glass-input');
-          const val = inputEl?.value.trim();
-          if (!val) return;
+        const val = pttTranscriptRef.current.trim();
+        pttTranscriptRef.current = ''; // clear for next PTT session
+        if (!val) return;
 
-          // If voice produced text that matches nothing (garbled noise), say sorry
-          // Skip phrases are still forwarded normally so they count as a miss
-          const normalizedVal = val.toLowerCase().replace(/['']/g, "'").replace(/[^a-z\s']/g, '').trim();
-          const VOICE_SKIP = ["i don't know","i dont know","don't know","dont know","no idea","i have no idea","skip","pass","next","i give up","give up","no clue","not sure","i'm not sure","im not sure"];
-          const isSkip = VOICE_SKIP.includes(normalizedVal);
-          const isCountry = findCountry(val) !== null;
-
-          if (!isSkip && !isCountry) {
-            // Recognizer heard something but it doesn't match any country — don't penalise
-            speakSorry();
-            setCurrentGuess('');
-            return;
-          }
-          processGuessRef.current(val);
-        }, 80);
+        // If voice produced text that matches nothing (garbled noise), say sorry
+        const normalizedVal = val.toLowerCase().replace(/['']/g, "'").replace(/[^a-z\s']/g, '').trim();
+        const VOICE_SKIP = ["i don't know","i dont know","don't know","dont know","no idea","i have no idea","skip","pass","next","i give up","give up","no clue","not sure","i'm not sure","im not sure"];
+        const isSkip = VOICE_SKIP.includes(normalizedVal);
+        const isCountry = findCountry(val) !== null;
+        if (!isSkip && !isCountry) {
+          speakSorry();
+          setCurrentGuess('');
+          return;
+        }
+        processGuessRef.current(val);
       };
       pttRecognitionRef.current = rec;
       try {
@@ -520,7 +518,11 @@ export default function App() {
         });
 
         const flagUrl = getCountryFlagUrl(matched.isoA3);
-        if (flagUrl) setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
+        if (flagUrl) {
+          setActiveFlag({ name: matched.name, url: flagUrl, fadeOut: false });
+          // Auto-dismiss the flag after 3 seconds
+          setTimeout(() => fadeActiveFlag(), 3000);
+        }
 
         // Check win condition 2: all countries named
         if (nextGuessed.size >= countriesDatabase.length) {
