@@ -252,7 +252,7 @@ const isoA3ToA2: Record<string, string> = {
 export function getCountryFlagUrl(isoA3: string): string | null {
   const code2 = isoA3ToA2[isoA3.toUpperCase()];
   if (!code2) return null;
-  return `https://flagcdn.com/w256/${code2.toLowerCase()}.png`;
+  return `https://flagcdn.com/256x192/${code2.toLowerCase()}.png`;
 }
 
 // ─── Continent System ─────────────────────────────────────────────────────────
