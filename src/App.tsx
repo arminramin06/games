@@ -646,40 +646,6 @@ export default function App() {
               })}
             </div>
 
-            {/* Last Guessed Flag — shown in sidebar when a country is correctly named */}
-            {activeFlag && (
-              <div style={{
-                padding: '16px',
-                background: 'rgba(6, 182, 212, 0.06)',
-                border: '1.5px solid rgba(6, 182, 212, 0.35)',
-                borderRadius: '16px',
-                display: 'flex', alignItems: 'center', gap: '14px',
-                opacity: activeFlag.fadeOut ? 0 : 1,
-                transform: activeFlag.fadeOut ? 'translateY(-6px) scale(0.97)' : 'translateY(0) scale(1)',
-                transition: 'opacity 0.4s ease, transform 0.4s ease',
-                animation: activeFlag.fadeOut ? 'none' : 'flagPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-              }}>
-                <img
-                  src={activeFlag.url}
-                  alt={`${activeFlag.name} flag`}
-                  style={{
-                    width: '80px', height: '50px',
-                    objectFit: 'cover', borderRadius: '6px',
-                    border: '1px solid rgba(255,255,255,0.15)',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
-                    flexShrink: 0,
-                  }}
-                />
-                <div>
-                  <div style={{ fontSize: '10px', color: 'var(--neon-cyan)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '3px' }}>
-                    🎉 Just Discovered!
-                  </div>
-                  <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                    {activeFlag.name}
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Discovered Countries */}
             <div className="glass-container" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1 }}>
@@ -935,6 +901,53 @@ export default function App() {
               className={shakeMap ? 'shake-animation' : ''}
               style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}
             >
+              {/* Flag overlay — left side of map, outside WorldMap overflow:hidden */}
+              {activeFlag && (
+                <div style={{
+                  position: 'absolute',
+                  top: '16px',
+                  left: '16px',
+                  zIndex: 30,
+                  pointerEvents: 'none',
+                  opacity: activeFlag.fadeOut ? 0 : 1,
+                  transform: activeFlag.fadeOut ? 'translateY(-8px) scale(0.93)' : 'translateY(0) scale(1)',
+                  transition: 'opacity 0.4s ease, transform 0.4s ease',
+                  animation: activeFlag.fadeOut ? 'none' : 'flagPop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
+                }}>
+                  <div style={{
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px',
+                    padding: '12px 14px',
+                    background: 'rgba(10, 12, 28, 0.88)',
+                    border: '1.5px solid rgba(6, 182, 212, 0.45)',
+                    borderRadius: '14px',
+                    boxShadow: '0 8px 24px rgba(6, 182, 212, 0.15), 0 4px 16px rgba(0,0,0,0.6)',
+                    backdropFilter: 'blur(16px)',
+                    WebkitBackdropFilter: 'blur(16px)',
+                    minWidth: '150px',
+                  }}>
+                    <div style={{ fontSize: '9px', color: 'var(--neon-cyan)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                      🎉 Just Discovered!
+                    </div>
+                    <img
+                      src={activeFlag.url}
+                      alt={`${activeFlag.name} flag`}
+                      style={{
+                        width: '150px', height: '90px',
+                        objectFit: 'cover', borderRadius: '8px',
+                        border: '1px solid rgba(255,255,255,0.15)',
+                        boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
+                      }}
+                    />
+                    <div style={{
+                      fontSize: '13px', fontWeight: 700, color: '#ffffff',
+                      letterSpacing: '0.02em', textAlign: 'left',
+                    }}>
+                      {activeFlag.name}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <WorldMap
                 guessedCountriesMap={guessedCountries}
                 playerMapColors={PLAYER_COLORS.map(c => c.mapFill)}
