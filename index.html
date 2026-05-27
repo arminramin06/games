@@ -123,7 +123,7 @@ kbd{
   <div class="ctrl"><kbd>⇧</kbd> Sprint</div>
   <div class="ctrl"><kbd>S</kbd> Shoot</div>
   <div class="ctrl"><kbd>W</kbd> Pass</div>
-  <div class="ctrl"><kbd>E</kbd> Slide (3s cd)</div>
+  <div class="ctrl"><kbd>E</kbd> Slide (11s cd)</div>
   <div class="ctrl"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Switch</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
@@ -236,7 +236,7 @@ const SHOOT_PWR = 11;
 const PASS_PWR  = 8;
 const BOOT_PWR  = 13;
 const SLIDE_SPD = 6;
-const SLIDE_CD  = 3.2;   // seconds cooldown
+const SLIDE_CD  = 11;    // seconds cooldown
 const P_SPEED   = 2.8;
 const P_SPRINT  = 4.4;
 const AI_SPD    = 1.9;
@@ -263,6 +263,57 @@ document.addEventListener('keydown',e=>{
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
+
+// ════════════════════════════════════
+//  ADAPTIVE AI BRAIN
+// ════════════════════════════════════
+const brain = {
+  shotYs:    [],   // Y of each user shot relative to goal center
+  positions: [],   // sampled {x,y} of user player
+  passCount: 0,
+  shootCount:0,
+  posTimer:  0,
+  adaptFlash:0,    // seconds to flash the learning badge
+
+  reset(){
+    this.shotYs=[];this.positions=[];
+    this.passCount=0;this.shootCount=0;
+    this.posTimer=0;this.adaptFlash=0;
+  },
+  recordShot(y){
+    this.shotYs.push(y-H/2);
+    this.shootCount++;
+    if(this.shotYs.length>20)this.shotYs.shift();
+    if(this.shotYs.length===3||this.shotYs.length===7)this.adaptFlash=2.5;
+  },
+  recordPass(){
+    this.passCount++;
+    if(this.passCount===4||this.passCount===9)this.adaptFlash=2.5;
+  },
+  samplePos(p){
+    if(!p)return;
+    this.positions.push({x:p.x,y:p.y});
+    if(this.positions.length>30)this.positions.shift();
+  },
+  get avgShotY(){  // Y bias of shots
+    if(!this.shotYs.length)return 0;
+    return this.shotYs.reduce((s,v)=>s+v,0)/this.shotYs.length;
+  },
+  get shotConf(){ return Math.min(1,this.shotYs.length/8); },
+  get passRate(){
+    const t=this.passCount+this.shootCount;
+    return t===0?0.5:this.passCount/t;
+  },
+  get avgX(){
+    if(!this.positions.length)return W/2;
+    return this.positions.reduce((s,p)=>s+p.x,0)/this.positions.length;
+  },
+  get posConf(){ return Math.min(1,this.positions.length/15); },
+  get level(){
+    const obs=this.shotYs.length+this.passCount+Math.floor(this.positions.length/4);
+    return Math.min(3,Math.floor(obs/5));
+  }
+};
 
 // ════════════════════════════════════
 //  STATE
@@ -487,6 +538,7 @@ function doShoot(){
   const dx=gx-userPlayer.x,dy=gy-userPlayer.y,d=Math.hypot(dx,dy)||1;
   ball.owner=null;ball.vx=(dx/d)*SHOOT_PWR;ball.vy=(dy/d)*SHOOT_PWR;
   userPlayer.cooldown=0.45;
+  brain.recordShot(gy);  // AI learns your shot placement
 }
 function doPass(){
   if(!userPlayer||ball.owner!==userPlayer)return;
@@ -501,6 +553,7 @@ function doPass(){
   const dx=best.x-userPlayer.x,dy=best.y-userPlayer.y,d=Math.hypot(dx,dy)||1;
   ball.owner=null;ball.vx=(dx/d)*PASS_PWR;ball.vy=(dy/d)*PASS_PWR;
   userPlayer.cooldown=0.25;
+  brain.recordPass();  // AI learns you pass frequently
 }
 function doSlide(){
   if(!userPlayer||userPlayer.sliding||userPlayer.slideCd>0)return;
@@ -530,9 +583,13 @@ function doGKBoot(){
 function updateAI(p){
   if(p.isUser||p.sliding||p.blocking)return;
   const atkX=p.team===0?PX+PW:PX;
+
   if(p.role==='goalkeeper'){
     const lineX=p.team===0?PX+20:PX+PW-20;
-    const tY=Math.max(GT+p.r,Math.min(GB-p.r,ball.y));
+    // ADAPTIVE: bias GK toward where player tends to shoot
+    const shotBias = p.team===1 ? brain.avgShotY * brain.shotConf * 0.75 : 0;
+    const rawY = ball.y + shotBias;
+    const tY=Math.max(GT+p.r,Math.min(GB-p.r,rawY));
     moveTo(p,lineX,tY,GK_AI_SPD);
     const closeX=p.team===0?PX+130:PX+PW-130;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
@@ -540,23 +597,36 @@ function updateAI(p){
     if(ball.owner===p&&Math.random()<0.04)aiGKBoot(p);
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<0.08){
+      // ADAPTIVE: block more often if player shoots a lot
+      const blockChance = 0.06 + (1-brain.passRate)*brain.shotConf*0.08;
+      if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<blockChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
       }
     }
     clamp(p);return;
   }
+
   if(ball.owner===p){
     moveTo(p,atkX+(p.team===1?80:-80),H/2,p.spd);
-    if(Math.abs(p.x-atkX)<200&&Math.random()<0.03)aiShoot(p,atkX);
+    // ADAPTIVE: shoot more aggressively if player passes a lot (passer = more conservative)
+    const shootChance = p.team===1 ? 0.03+brain.passRate*0.04 : 0.03;
+    if(Math.abs(p.x-atkX)<200&&Math.random()<shootChance)aiShoot(p,atkX);
     if(Math.random()<0.007)aiPass(p);
   } else if(!ball.owner||ball.owner.team!==p.team){
-    moveTo(p,ball.x,ball.y,p.spd);
+    // ADAPTIVE: press harder if player dribbles a lot (low pass rate)
+    const pressMult = p.team===1 ? 1+(1-brain.passRate)*brain.posConf*0.35 : 1;
+    moveTo(p,ball.x,ball.y,p.spd*pressMult);
     if(dist(p,ball)<42&&ball.owner&&ball.owner.team!==p.team&&Math.random()<0.012){
       const dx=ball.x-p.x,dy=ball.y-p.y,d=Math.hypot(dx,dy)||1;
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
-  } else {moveTo(p,atkX+(p.team===0?-80:80),p.homeY,p.spd*.5);}
+  } else {
+    // ADAPTIVE: defenders shade toward where player tends to roam
+    const interceptX = p.team===1 && brain.posConf>0.3
+      ? brain.avgX+(PX+PW<W/2?-50:50)
+      : atkX+(p.team===0?-80:80);
+    moveTo(p,interceptX,p.homeY,p.spd*.5);
+  }
   clamp(p);
 }
 function aiShoot(p,gx){
@@ -722,6 +792,17 @@ function drawOverlay(){
     ctx.fillStyle='#fbbf24';ctx.font='bold 10px system-ui';ctx.textAlign='center';
     ctx.fillText(`SLIDE ${userPlayer.slideCd.toFixed(1)}s`,userPlayer.x,userPlayer.y-userPlayer.r-15);
   }
+  // AI learning badge (top-right)
+  if(brain.level>0){
+    const lvlLabels=['','🧠 AI Learning...','🧠 AI Adapting!','🧠 AI Calibrated'];
+    const isFlashing=brain.adaptFlash>0;
+    ctx.fillStyle=isFlashing?'rgba(248,113,113,.2)':'rgba(0,0,0,.45)';
+    rRect(ctx,W-188,PY+5,172,22,6);ctx.fill();
+    if(isFlashing){ctx.strokeStyle='#f87171';ctx.lineWidth=1.5;rRect(ctx,W-188,PY+5,172,22,6);ctx.stroke();}
+    ctx.fillStyle=isFlashing?'#f87171':'rgba(255,255,255,.45)';
+    ctx.font=`${isFlashing?'bold ':''} 11px system-ui`;ctx.textAlign='center';
+    ctx.fillText(lvlLabels[brain.level],W-102,PY+19);
+  }
 }
 
 // ════════════════════════════════════
@@ -733,6 +814,10 @@ function loop(ts){
   drawPitch();
   if(gameState==='playing'||gameState==='goal'){
     if(gameState==='playing'){
+      // Sample user position every 2s for spatial learning
+      brain.posTimer-=dt;
+      if(brain.posTimer<=0){brain.samplePos(userPlayer);brain.posTimer=2;}
+      if(brain.adaptFlash>0)brain.adaptFlash-=dt;
       for(const p of players){updateAI(p);p.update(dt);}
       updateBall();
     }
@@ -765,6 +850,7 @@ function startGame(){
   document.getElementById('lbl-you').textContent=`${uT.flag} ${uT.name}`;
   document.getElementById('lbl-cpu').textContent=`${cT.flag} ${cT.name}`;
 
+  brain.reset();  // keep learning across games — remove this line to reset per game
   score=[0,0];timeLeft=180;gameState='playing';
   players=[];userTeam=[];userPlayer=null;
   document.getElementById('timer').classList.remove('urgent');
