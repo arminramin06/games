@@ -141,7 +141,7 @@ kbd{
   <div class="ctrl"><kbd>W</kbd> Pass</div>
   <div class="ctrl"><kbd>E</kbd> Slide (6s cd)</div>
   <div class="ctrl"><kbd>Q</kbd> Juke</div>
-  <div class="ctrl"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Switch</div>
+  <div class="ctrl"><kbd>1</kbd>–<kbd>4</kbd> Switch</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
 </div>
@@ -327,6 +327,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='1') switchTo(0);
     if(e.key==='2') switchTo(1);
     if(e.key==='3') switchTo(2);
+    if(e.key==='4') switchTo(3);
     if(e.key==='s'||e.key==='S') doShoot();
     if(e.key==='w'||e.key==='W') doPass();
     if(e.key==='e'||e.key==='E') doSlide();
@@ -642,17 +643,20 @@ function findOpenMate(p){
 function getSpreadPos(p){
   const bx=ball.owner?ball.owner.x:ball.x;
   const by=ball.owner?ball.owner.y:ball.y;
-  if(p.playerNum===1){ // defender: wide outlet, opposite side from ball
-    const sx=Math.max(PX+p.r+25,Math.min(W*0.38,bx-200));
-    // Opposite Y side from ball for maximum width
-    const sy=by<H*0.52?H*0.75:H*0.25;
-    return{x:sx,y:sy};
-  }
-  if(p.playerNum===2){ // attacker: far forward, wide, dangerous
-    const ax=Math.min(PX+PW-p.r-40,bx+260);
-    // Spread to opposite vertical channel from ball
-    const ay=by<H*0.5?H*0.72:H*0.28;
+  if(p.playerNum===1){ // attacker: push far forward into dangerous space
+    const ax=Math.min(PX+PW-p.r-40,bx+270);
+    const ay=by<H*0.5?H*0.73:H*0.27; // wide channel opposite to ball
     return{x:ax,y:ay};
+  }
+  if(p.playerNum===2){ // midfielder: central support, ahead of ball
+    const mx=Math.min(PX+PW-p.r-120,Math.max(W*0.42,bx+90));
+    const my=by<H*0.5?H*0.58:H*0.42;
+    return{x:mx,y:my};
+  }
+  if(p.playerNum===3){ // defender: wide outlet, safely behind ball
+    const sx=Math.max(PX+p.r+25,Math.min(W*0.36,bx-210));
+    const sy=by<H*0.52?H*0.76:H*0.24;
+    return{x:sx,y:sy};
   }
   return{x:p.homeX,y:p.homeY};
 }
@@ -815,7 +819,6 @@ function updateAI(p){
     moveTo(p,atkX+(p.team===1?70:-70),H/2,spd);
     const shootChance=diff.shootChance+brain.passRate*diff.shootChance*0.5;
     if(Math.abs(p.x-atkX)<200&&Math.random()<shootChance)aiShoot(p,atkX);
-    // CPU passes much more often
     if(Math.random()<0.025){
       const mate=findOpenMate(p);
       if(mate)aiPassTo(p,mate);
@@ -828,16 +831,24 @@ function updateAI(p){
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
   } else {
-    // CPU teammate has ball — CPU also spreads into space
-    const cpuFields=players.filter(q=>q.team===1&&q.role!=='goalkeeper'&&q!==p);
-    const partnerX=cpuFields.length>0?cpuFields[0].x:ball.x;
-    // One pushes deep, one provides outlet
-    if(p.x<partnerX){ // this player is more advanced (closer to left goal)
-      const ax=Math.max(PX+p.r+60,ball.x-230);
-      const ay=ball.y<H/2?H*0.72:H*0.28;
-      moveTo(p,ax,ay,spd*0.88);
+    // CPU teammate has ball: rank by homeX and spread into 3 zones
+    const cpuFields=players
+      .filter(q=>q.team===1&&q.role!=='goalkeeper')
+      .sort((a,b)=>a.homeX-b.homeX); // lowest homeX = most advanced toward PX
+    const rank=cpuFields.indexOf(p); // 0=attacker, 1=midfielder, 2=defender
+    if(rank===0){
+      // Attacker: push into dangerous position near user goal
+      const ax=Math.max(PX+p.r+55,ball.x-260);
+      const ay=ball.y<H/2?H*0.73:H*0.27;
+      moveTo(p,ax,ay,spd*0.9);
+    } else if(rank===1){
+      // Midfielder: central support one step behind
+      const mx=Math.min(PX+PW-p.r-100,Math.max(W*0.45,ball.x-90));
+      const my=ball.y<H/2?H*0.55:H*0.45;
+      moveTo(p,mx,my,spd*0.78);
     } else {
-      const sx=Math.min(PX+PW-p.r-30,ball.x+140);
+      // Defender: safe outlet position behind ball
+      const sx=Math.min(PX+PW-p.r-30,ball.x+165);
       moveTo(p,sx,p.homeY,spd*0.7);
     }
   }
@@ -1153,20 +1164,22 @@ function startGame(){
   players=[];userTeam=[];userPlayer=null;
   document.getElementById('timer').classList.remove('urgent');
 
-  const cx=W/2,cy=H/2,qx=PW/4;
+  const cx=W/2,cy=H/2;
 
-  // User team (Blue side, attacks RIGHT)
-  const def=new Player(PX+qx,cy,0,'field',uT,5);    def.playerNum=1;
-  const att=new Player(cx-40,cy,0,'field',uT,9);    att.playerNum=2;att.isUser=true;
-  const gk0=new Player(PX+20,cy,0,'goalkeeper',uT,1); gk0.playerNum=3;
-  players.push(def,att,gk0);
-  userTeam=[def,att,gk0];userPlayer=att;
+  // ── USER TEAM (attacks RIGHT, keys 1=att 2=mid 3=def 4=gk) ──
+  const att=new Player(cx-55,            cy, 0,'field',     uT, 9);  att.playerNum=1; att.isUser=true;
+  const mid=new Player(PX+PW*0.33,       cy, 0,'field',     uT, 8);  mid.playerNum=2;
+  const def=new Player(PX+PW*0.17,       cy, 0,'field',     uT, 5);  def.playerNum=3;
+  const gk0=new Player(PX+22,            cy, 0,'goalkeeper',uT, 1);  gk0.playerNum=4;
+  players.push(att,mid,def,gk0);
+  userTeam=[att,mid,def,gk0]; userPlayer=att;
 
-  // CPU team (attacks LEFT)
-  const cdef=new Player(PX+PW-qx,cy,1,'field',cT,6);
-  const catt=new Player(cx+40,cy,1,'field',cT,11);
-  const cgk=new Player(PX+PW-20,cy,1,'goalkeeper',cT,1);
-  players.push(cdef,catt,cgk);
+  // ── CPU TEAM (attacks LEFT) ──────────────────────────────
+  const catt=new Player(cx+55,           cy, 1,'field',     cT,11);
+  const cmid=new Player(PX+PW*0.67,      cy, 1,'field',     cT, 8);
+  const cdef=new Player(PX+PW*0.83,      cy, 1,'field',     cT, 4);
+  const cgk =new Player(PX+PW-22,        cy, 1,'goalkeeper',cT, 1);
+  players.push(catt,cmid,cdef,cgk);
 
   for(const p of players){p.homeX=p.x;p.homeY=p.y;}
   resetKickoff();updateHUD();
