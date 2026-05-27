@@ -1311,25 +1311,34 @@ function updateAI(p){
   // ── GOALKEEPER (both teams) ───────────────────────
   if(p.role==='goalkeeper'){
     const IMP=DIFFICULTIES[3]; // friendly GK always on Impossible
-    const gkSpd=p.team===0?IMP.gkSpd:spd; // team 0 GK = Impossible speed
+    // CPU GK is deliberately sluggish so the player can score more easily
+    const cpuGkSpd = spd * 0.48;           // CPU GK runs at 48% speed
+    const gkSpd=p.team===0?IMP.gkSpd:cpuGkSpd;
     const lineX=p.team===0?PX+20:PX+PW-20;
-    const shotBias=p.team===1?brain.avgShotY*brain.shotConf*0.75:0;
-    const tY=Math.max(GT+p.r,Math.min(GB-p.r,ball.y+shotBias));
+    // CPU GK only tracks 55% toward ball.y — reacts slowly and imprecisely
+    const cpuTrack = p.team===1
+      ? H/2 + (ball.y - H/2) * 0.55 + (brain.avgShotY * brain.shotConf * 0.3)
+      : ball.y;
+    const tY=Math.max(GT+p.r,Math.min(GB-p.r,cpuTrack));
     moveTo(p,lineX,tY,gkSpd);
-    const closeX=p.team===0?PX+130:PX+PW-130;
+    // CPU GK only rushes out when ball is very close (70px vs old 130px)
+    const closeX=p.team===0?PX+130:PX+PW-70;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
     if(danger)moveTo(p,ball.x,ball.y,gkSpd);
-    if(ball.owner===p&&Math.random()<0.06)aiGKBoot(p); // more aggressive boot
+    if(ball.owner===p&&Math.random()<0.06)aiGKBoot(p);
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      // Team 0 GK: always uses Impossible blockChance
-      const bChance=p.team===0?IMP.blockChance:diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance;
+      // CPU GK block chance is 20% of normal — misses most shots
+      const bChance=p.team===0
+        ?IMP.blockChance
+        :(diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance)*0.20;
       if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<bChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
       }
     }
     clamp(p);return;
   }
+
 
   // ── USER TEAM AI — always Impossible quality regardless of selected difficulty ──
   if(p.team===0){
