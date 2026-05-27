@@ -208,16 +208,10 @@ kbd{
   <button class="btn" onclick="backToSplash()">Play Again 🎉</button>
 </div>
 
-<!-- Spectate Bar -->
-<div id="spectate-bar" class="hidden" style="position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:10px 30px;background:rgba(6,13,26,.92);backdrop-filter:blur(8px);border-bottom:1px solid rgba(251,191,36,.25);">
-  <div style="display:flex;align-items:center;gap:14px;">
-    <span style="font-size:22px;">👁</span>
-    <div>
-      <div style="font-size:11px;font-weight:800;color:#fbbf24;letter-spacing:.1em;">YOU'VE BEEN ELIMINATED · SPECTATING</div>
-      <div id="spectate-match-label" style="font-size:11px;color:rgba(255,255,255,.45);"></div>
-    </div>
-  </div>
-  <button class="btn" style="padding:8px 22px;font-size:13px;" onclick="skipSpectate()">Skip Match →</button>
+<!-- Spectate Bar: compact bottom-right pill -->
+<div id="spectate-bar" class="hidden" style="position:fixed;bottom:22px;right:24px;z-index:200;display:flex;flex-direction:column;align-items:flex-end;gap:7px;">
+  <div id="spectate-match-label" style="font-size:10.5px;color:rgba(255,255,255,.45);background:rgba(6,13,26,.82);backdrop-filter:blur(6px);padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,.08);text-align:right;"></div>
+  <button class="btn" style="padding:7px 18px;font-size:13px;" onclick="skipSpectate()">Skip ⏭</button>
 </div>
 
 <script>
@@ -1199,15 +1193,13 @@ function updateAI(p){
   // ── USER TEAM AI (non-GK, non-user-controlled) ────
   if(p.team===0){
     if(ball.owner===p){
+      // Same shoot/pass aggressiveness as the CPU (difficulty-scaled)
       const mate=findOpenMate(p);
       const oppNear=players.some(o=>o.team!==0&&dist(o,p)<100);
-      if(mate&&(oppNear||Math.random()<0.055)){
-        aiPassTo(p,mate);
-      } else if(Math.abs(p.x-atkX)<220&&Math.random()<0.028){
-        aiShoot(p,atkX);
-      } else {
-        moveTo(p,atkX-40,H/2,spd);
-      }
+      const sc=diff.shootChance*1.1; // slightly boosted so they actually score
+      if(Math.abs(p.x-atkX)<210&&Math.random()<sc) aiShoot(p,atkX);
+      else if(mate&&(oppNear||Math.random()<sc*0.9)) aiPassTo(p,mate);
+      else moveTo(p,atkX-55,H/2,spd);
     } else if(ball.owner?.team===0
            || (!ball.owner && lastBallTeam===0 && Math.hypot(ball.vx,ball.vy)>1.2)){
       // Our team has ball or ball is from our pass → hold triangle
@@ -1224,8 +1216,9 @@ function updateAI(p){
         moveTo(p,sp.x,sp.y,spd*0.88);
       }
     } else {
-      // CPU has ball → press the ball carrier, don't just go home
-      moveTo(p,ball.owner.x,ball.owner.y,spd*0.9);
+      // CPU has ball → press at same intensity as CPU presses us
+      const pressMult=1+(1-brain.passRate)*brain.posConf*(diff.pressMax||0.5)*0.85;
+      moveTo(p,ball.owner.x,ball.owner.y,spd*pressMult);
     }
     clamp(p);return;
   }
