@@ -100,6 +100,22 @@ kbd{
 .team-name{font-size:13px;font-weight:700;text-align:center;}
 .team-flag{font-size:20px;}
 .select-btn-row{display:flex;gap:16px;margin-top:6px;}
+
+/* difficulty select */
+#diff-select h2{font-size:32px;font-weight:900;margin-bottom:6px;}
+#diff-select .sub{font-size:14px;color:rgba(255,255,255,.45);margin-bottom:28px;}
+.diff-grid{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:18px;
+  max-width:820px;
+}
+.diff-card{
+  background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.08);
+  border-radius:18px;padding:24px 16px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  transition:transform .18s,border-color .18s,background .18s,box-shadow .18s;
+}
+.diff-card:hover{background:rgba(255,255,255,.08);transform:translateY(-4px);}
+.diff-card.selected{transform:translateY(-4px);background:rgba(255,255,255,.06);}
 </style>
 </head>
 <body>
@@ -123,7 +139,7 @@ kbd{
   <div class="ctrl"><kbd>⇧</kbd> Sprint</div>
   <div class="ctrl"><kbd>S</kbd> Shoot</div>
   <div class="ctrl"><kbd>W</kbd> Pass</div>
-  <div class="ctrl"><kbd>E</kbd> Slide (11s cd)</div>
+  <div class="ctrl"><kbd>E</kbd> Slide (6s cd)</div>
   <div class="ctrl"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Switch</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
@@ -140,11 +156,22 @@ kbd{
 <!-- Team Select -->
 <div id="team-select" class="screen hidden">
   <h2>Choose Your Team</h2>
-  <p class="sub">Click a team to select, then kick off!</p>
+  <p class="sub">Pick your team, then choose difficulty!</p>
   <div class="teams-grid" id="teams-grid"></div>
   <div class="select-btn-row" style="margin-top:20px;">
     <button class="btn red" onclick="document.getElementById('team-select').classList.add('hidden');document.getElementById('splash').classList.remove('hidden');">Back</button>
-    <button class="btn" id="btn-kickoff" onclick="startGame()" disabled style="opacity:.4;cursor:not-allowed;">Kick Off!</button>
+    <button class="btn" id="btn-next" onclick="showDiffSelect()" disabled style="opacity:.4;cursor:not-allowed;">Next: Difficulty →</button>
+  </div>
+</div>
+
+<!-- Difficulty Select -->
+<div id="diff-select" class="screen hidden">
+  <h2>Choose Difficulty</h2>
+  <p class="sub">How tough do you want the CPU to be?</p>
+  <div class="diff-grid" id="diff-grid"></div>
+  <div class="select-btn-row" style="margin-top:24px;">
+    <button class="btn red" onclick="document.getElementById('diff-select').classList.add('hidden');document.getElementById('team-select').classList.remove('hidden');">← Back</button>
+    <button class="btn" id="btn-kickoff" onclick="startGame()">Kick Off! ⚽</button>
   </div>
 </div>
 
@@ -169,6 +196,18 @@ const TEAMS = [
 
 let selectedTeam = null;
 let cpuTeam      = null;
+
+// ════════════════════════════════════
+//  DIFFICULTIES
+// ════════════════════════════════════
+const DIFFICULTIES = [
+  { name:'Easy',       emoji:'😊', desc:'Slow reactions · Makes mistakes',          color:'#22c55e', aiSpd:1.3, gkSpd:1.8, shootChance:0.012, pressMax:0,    blockChance:0.03, slideChance:0.004, brainMult:0.3 },
+  { name:'Normal',     emoji:'⚽', desc:'Balanced challenge · Learns from you',     color:'#38bdf8', aiSpd:1.9, gkSpd:2.8, shootChance:0.030, pressMax:0.35, blockChance:0.06, slideChance:0.012, brainMult:1.0 },
+  { name:'Hard',       emoji:'💪', desc:'Aggressive pressing · Fast reactions',      color:'#f59e0b', aiSpd:2.7, gkSpd:3.7, shootChance:0.055, pressMax:0.60, blockChance:0.11, slideChance:0.022, brainMult:2.0 },
+  { name:'Impossible', emoji:'💀', desc:'Relentless · Perfect AI · No mercy',       color:'#f87171', aiSpd:3.5, gkSpd:4.8, shootChance:0.080, pressMax:0.90, blockChance:0.18, slideChance:0.034, brainMult:3.5 },
+];
+let selectedDiff = 1;   // default Normal
+let diff = DIFFICULTIES[1];
 
 // Build team selection grid
 const grid = document.getElementById('teams-grid');
@@ -208,7 +247,7 @@ TEAMS.forEach((t,i) => {
     document.querySelectorAll('.team-card').forEach(c=>c.classList.remove('selected'));
     card.classList.add('selected');
     selectedTeam = i;
-    const btn = document.getElementById('btn-kickoff');
+    const btn = document.getElementById('btn-next');
     btn.disabled = false; btn.style.opacity='1'; btn.style.cursor='pointer';
   });
   grid.appendChild(card);
@@ -217,6 +256,38 @@ TEAMS.forEach((t,i) => {
 function showTeamSelect() {
   document.getElementById('splash').classList.add('hidden');
   document.getElementById('team-select').classList.remove('hidden');
+}
+
+function showDiffSelect() {
+  if(selectedTeam===null)return;
+  document.getElementById('team-select').classList.add('hidden');
+  document.getElementById('diff-select').classList.remove('hidden');
+  // Build difficulty grid (once)
+  const dg=document.getElementById('diff-grid');
+  if(dg.children.length) return;
+  DIFFICULTIES.forEach((d,i)=>{
+    const card=document.createElement('div');
+    card.className='diff-card'+(i===selectedDiff?' selected':'');
+    card.style.borderColor=i===selectedDiff?d.color:'rgba(255,255,255,.08)';
+    if(i===selectedDiff)card.style.boxShadow=`0 0 22px ${d.color}44`;
+    card.innerHTML=`
+      <div style="font-size:52px;line-height:1">${d.emoji}</div>
+      <div style="font-size:19px;font-weight:900;color:${d.color};letter-spacing:.02em">${d.name}</div>
+      <div style="font-size:12px;color:rgba(255,255,255,.45);text-align:center;line-height:1.5">${d.desc}</div>
+    `;
+    card.addEventListener('click',()=>{
+      document.querySelectorAll('.diff-card').forEach(c=>{
+        c.classList.remove('selected');
+        c.style.borderColor='rgba(255,255,255,.08)';
+        c.style.boxShadow='';
+      });
+      card.classList.add('selected');
+      card.style.borderColor=d.color;
+      card.style.boxShadow=`0 0 22px ${d.color}44`;
+      selectedDiff=i;
+    });
+    dg.appendChild(card);
+  });
 }
 
 // ════════════════════════════════════
@@ -236,7 +307,7 @@ const SHOOT_PWR = 11;
 const PASS_PWR  = 8;
 const BOOT_PWR  = 13;
 const SLIDE_SPD = 6;
-const SLIDE_CD  = 11;    // seconds cooldown
+const SLIDE_CD  = 6;     // seconds cooldown
 const P_SPEED   = 2.8;
 const P_SPRINT  = 4.4;
 const AI_SPD    = 1.9;
@@ -400,7 +471,10 @@ class Player {
     this.cooldown=0;
     this.homeX=x;this.homeY=y;
   }
-  get spd(){return this.role==='goalkeeper'?GK_SPD:AI_SPD;}
+  get spd(){
+    if(!diff) return this.role==='goalkeeper'?GK_SPD:AI_SPD;
+    return this.role==='goalkeeper'?diff.gkSpd:diff.aiSpd;
+  }
 
   update(dt){
     if(this.cooldown>0) this.cooldown-=dt;
@@ -583,6 +657,7 @@ function doGKBoot(){
 function updateAI(p){
   if(p.isUser||p.sliding||p.blocking)return;
   const atkX=p.team===0?PX+PW:PX;
+  const spd=p.spd;  // uses diff
 
   if(p.role==='goalkeeper'){
     const lineX=p.team===0?PX+20:PX+PW-20;
@@ -590,15 +665,15 @@ function updateAI(p){
     const shotBias = p.team===1 ? brain.avgShotY * brain.shotConf * 0.75 : 0;
     const rawY = ball.y + shotBias;
     const tY=Math.max(GT+p.r,Math.min(GB-p.r,rawY));
-    moveTo(p,lineX,tY,GK_AI_SPD);
+    moveTo(p,lineX,tY,spd);
     const closeX=p.team===0?PX+130:PX+PW-130;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
-    if(danger)moveTo(p,ball.x,ball.y,GK_AI_SPD);
+    if(danger)moveTo(p,ball.x,ball.y,spd);
     if(ball.owner===p&&Math.random()<0.04)aiGKBoot(p);
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      // ADAPTIVE: block more often if player shoots a lot
-      const blockChance = 0.06 + (1-brain.passRate)*brain.shotConf*0.08;
+      // ADAPTIVE + DIFFICULTY: block chance scales with both
+      const blockChance=diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance;
       if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<blockChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
       }
@@ -607,25 +682,26 @@ function updateAI(p){
   }
 
   if(ball.owner===p){
-    moveTo(p,atkX+(p.team===1?80:-80),H/2,p.spd);
-    // ADAPTIVE: shoot more aggressively if player passes a lot (passer = more conservative)
-    const shootChance = p.team===1 ? 0.03+brain.passRate*0.04 : 0.03;
+    moveTo(p,atkX+(p.team===1?80:-80),H/2,spd);
+    // ADAPTIVE + DIFFICULTY shoot chance
+    const shootChance=p.team===1?diff.shootChance+brain.passRate*diff.shootChance:diff.shootChance*0.4;
     if(Math.abs(p.x-atkX)<200&&Math.random()<shootChance)aiShoot(p,atkX);
     if(Math.random()<0.007)aiPass(p);
   } else if(!ball.owner||ball.owner.team!==p.team){
-    // ADAPTIVE: press harder if player dribbles a lot (low pass rate)
-    const pressMult = p.team===1 ? 1+(1-brain.passRate)*brain.posConf*0.35 : 1;
-    moveTo(p,ball.x,ball.y,p.spd*pressMult);
-    if(dist(p,ball)<42&&ball.owner&&ball.owner.team!==p.team&&Math.random()<0.012){
+    // ADAPTIVE + DIFFICULTY press intensity
+    const pressMult=p.team===1?1+(1-brain.passRate)*brain.posConf*diff.pressMax:1;
+    moveTo(p,ball.x,ball.y,spd*pressMult);
+    // DIFFICULTY slide chance
+    if(dist(p,ball)<42&&ball.owner&&ball.owner.team!==p.team&&Math.random()<diff.slideChance){
       const dx=ball.x-p.x,dy=ball.y-p.y,d=Math.hypot(dx,dy)||1;
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
   } else {
     // ADAPTIVE: defenders shade toward where player tends to roam
-    const interceptX = p.team===1 && brain.posConf>0.3
+    const interceptX=p.team===1&&brain.posConf>0.3
       ? brain.avgX+(PX+PW<W/2?-50:50)
       : atkX+(p.team===0?-80:80);
-    moveTo(p,interceptX,p.homeY,p.spd*.5);
+    moveTo(p,interceptX,p.homeY,spd*.5);
   }
   clamp(p);
 }
@@ -835,7 +911,8 @@ function loop(ts){
 // ════════════════════════════════════
 function startGame(){
   if(selectedTeam===null)return;
-  // Hide team select
+  diff=DIFFICULTIES[selectedDiff];  // apply chosen difficulty
+  document.getElementById('diff-select').classList.add('hidden');
   document.getElementById('team-select').classList.add('hidden');
   document.getElementById('splash').classList.add('hidden');
 
@@ -850,7 +927,7 @@ function startGame(){
   document.getElementById('lbl-you').textContent=`${uT.flag} ${uT.name}`;
   document.getElementById('lbl-cpu').textContent=`${cT.flag} ${cT.name}`;
 
-  brain.reset();  // keep learning across games — remove this line to reset per game
+  brain.reset();
   score=[0,0];timeLeft=180;gameState='playing';
   players=[];userTeam=[];userPlayer=null;
   document.getElementById('timer').classList.remove('urgent');
