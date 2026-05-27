@@ -1492,8 +1492,8 @@ function onGoal(team){
   updateHUD();
   const el=document.getElementById(team===0?'score-you':'score-cpu');
   el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),400);
-  // No goal overlay — just a brief pause then kick off
-  setTimeout(()=>{resetKickoff();gameState='playing';},850);
+  // 10-second celebration window before kickoff reset
+  setTimeout(()=>{resetKickoff();gameState='playing';},10000);
 }
 function resetKickoff(){
   if(userPlayer) userPlayer.celebrating=false;
