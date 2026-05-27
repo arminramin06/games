@@ -402,7 +402,7 @@ let rafId=null,lastTs=0;
 // ════════════════════════════════════
 //  BALL
 // ════════════════════════════════════
-const ball={x:W/2,y:H/2,vx:0,vy:0,r:10,owner:null};
+const ball={x:W/2,y:H/2,vx:0,vy:0,r:10,owner:null,spin:0,angle:0};
 
 // ════════════════════════════════════
 //  JERSEY DRAWING
@@ -620,30 +620,38 @@ function moveTo(p,tx,ty,spd){
 //  AI HELPERS
 // ════════════════════════════════════
 function findOpenMate(p){
-  // Find teammate in most open space (fewest opponents nearby) and forward
+  // Score: heavily prefer forward + most open teammate
   let best=null,bs=-Infinity;
   for(const t of players){
     if(t===p||t.team!==p.team)continue;
+    // Don't pass back to GK unless desperate
+    if(t.role==='goalkeeper'&&dist(p,t)<250)continue;
     let minOD=Infinity;
-    for(const o of players){if(o.team===p.team)continue;minOD=Math.min(minOD,dist(t,o));}
+    for(const o of players){
+      if(o.team===p.team)continue;
+      minOD=Math.min(minOD,dist(t,o));
+    }
     const fwd=p.team===0?t.x-p.x:p.x-t.x;
-    const s=minOD*0.3+Math.max(0,fwd)*0.7;
-    if(minOD>60&&s>bs){bs=s;best=t;}
+    const openBonus=Math.max(0,minOD-50)*0.45;
+    const fwdBonus=Math.max(0,fwd)*1.1;
+    const s=openBonus+fwdBonus;
+    if(minOD>45&&s>bs){bs=s;best=t;}
   }
   return best;
 }
 function getSpreadPos(p){
-  // Return where this user AI teammate should spread to
   const bx=ball.owner?ball.owner.x:ball.x;
   const by=ball.owner?ball.owner.y:ball.y;
-  if(p.playerNum===1){ // defender: support position behind ball carrier
-    const sx=Math.max(PX+p.r+20,bx-155);
-    return{x:sx,y:p.homeY};
+  if(p.playerNum===1){ // defender: wide outlet, opposite side from ball
+    const sx=Math.max(PX+p.r+25,Math.min(W*0.38,bx-200));
+    // Opposite Y side from ball for maximum width
+    const sy=by<H*0.52?H*0.75:H*0.25;
+    return{x:sx,y:sy};
   }
-  if(p.playerNum===2){ // attacker: push wide and forward into space
-    const ax=Math.min(PX+PW-p.r-65,bx+210);
-    // Spread to opposite vertical half from ball
-    const ay=by<H*0.5?H*0.68:H*0.32;
+  if(p.playerNum===2){ // attacker: far forward, wide, dangerous
+    const ax=Math.min(PX+PW-p.r-40,bx+260);
+    // Spread to opposite vertical channel from ball
+    const ay=by<H*0.5?H*0.72:H*0.28;
     return{x:ax,y:ay};
   }
   return{x:p.homeX,y:p.homeY};
@@ -672,8 +680,9 @@ function doShoot(){
   const gy=H/2+(Math.random()-.5)*38;
   const dx=gx-userPlayer.x,dy=gy-userPlayer.y,d=Math.hypot(dx,dy)||1;
   ball.owner=null;ball.vx=(dx/d)*SHOOT_PWR;ball.vy=(dy/d)*SHOOT_PWR;
+  ball.spin=(userPlayer.y-gy)*0.18; // lateral offset creates spin/curve
   userPlayer.cooldown=0.45;
-  brain.recordShot(gy);  // AI learns your shot placement
+  brain.recordShot(gy);
 }
 function doPass(){
   if(!userPlayer||ball.owner!==userPlayer)return;
@@ -780,53 +789,66 @@ function updateAI(p){
   // ── USER TEAM AI (non-GK, non-user-controlled) ────
   if(p.team===0){
     if(ball.owner===p){
-      // Has ball: find open mate and pass, or shoot/dribble
       const mate=findOpenMate(p);
-      if(mate&&dist(p,mate)>80&&Math.random()<0.028){
+      // Pass if: opponent is near, or random chance (higher frequency)
+      const oppNear=players.some(o=>o.team!==0&&dist(o,p)<100);
+      if(mate&&(oppNear||Math.random()<0.055)){
         aiPassTo(p,mate);
+      } else if(Math.abs(p.x-atkX)<220&&Math.random()<0.028){
+        aiShoot(p,atkX);
       } else {
-        moveTo(p,atkX-55,H/2,spd);
-        if(Math.abs(p.x-atkX)<240&&Math.random()<0.022)aiShoot(p,atkX);
+        moveTo(p,atkX-40,H/2,spd);
       }
     } else if(!ball.owner||ball.owner.team!==0){
-      // CPU has ball or loose: retreat to home shape
+      // CPU has ball or loose: fall back to defensive home shape
       moveTo(p,p.homeX,p.homeY,spd);
     } else {
-      // Teammate has ball: spread into open space
+      // Teammate has ball: spread aggressively into open channels
       const sp=getSpreadPos(p);
-      moveTo(p,sp.x,sp.y,spd*0.88);
+      moveTo(p,sp.x,sp.y,spd*0.93);
     }
     clamp(p);return;
   }
 
   // ── CPU TEAM AI ───────────────────────────────────
   if(ball.owner===p){
-    moveTo(p,atkX+(p.team===1?80:-80),H/2,spd);
-    const shootChance=p.team===1?diff.shootChance+brain.passRate*diff.shootChance:diff.shootChance*0.4;
+    moveTo(p,atkX+(p.team===1?70:-70),H/2,spd);
+    const shootChance=diff.shootChance+brain.passRate*diff.shootChance*0.5;
     if(Math.abs(p.x-atkX)<200&&Math.random()<shootChance)aiShoot(p,atkX);
-    // CPU passes to open teammate occasionally
-    if(Math.random()<0.009){
+    // CPU passes much more often
+    if(Math.random()<0.025){
       const mate=findOpenMate(p);
       if(mate)aiPassTo(p,mate);
     }
   } else if(!ball.owner||ball.owner.team!==p.team){
-    const pressMult=p.team===1?1+(1-brain.passRate)*brain.posConf*diff.pressMax:1;
+    const pressMult=1+(1-brain.passRate)*brain.posConf*diff.pressMax*0.8;
     moveTo(p,ball.x,ball.y,spd*pressMult);
     if(dist(p,ball)<42&&ball.owner&&ball.owner.team!==p.team&&Math.random()<diff.slideChance){
       const dx=ball.x-p.x,dy=ball.y-p.y,d=Math.hypot(dx,dy)||1;
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
   } else {
-    const interceptX=p.team===1&&brain.posConf>0.3
-      ? brain.avgX+(PX+PW<W/2?-50:50)
-      : atkX+(p.team===0?-80:80);
-    moveTo(p,interceptX,p.homeY,spd*.5);
+    // CPU teammate has ball — CPU also spreads into space
+    const cpuFields=players.filter(q=>q.team===1&&q.role!=='goalkeeper'&&q!==p);
+    const partnerX=cpuFields.length>0?cpuFields[0].x:ball.x;
+    // One pushes deep, one provides outlet
+    if(p.x<partnerX){ // this player is more advanced (closer to left goal)
+      const ax=Math.max(PX+p.r+60,ball.x-230);
+      const ay=ball.y<H/2?H*0.72:H*0.28;
+      moveTo(p,ax,ay,spd*0.88);
+    } else {
+      const sx=Math.min(PX+PW-p.r-30,ball.x+140);
+      moveTo(p,sx,p.homeY,spd*0.7);
+    }
   }
   clamp(p);
 }
 function aiShoot(p,gx){
-  const dx=gx-p.x,dy=H/2+(Math.random()-.5)*38-p.y,d=Math.hypot(dx,dy)||1;
-  ball.owner=null;ball.vx=(dx/d)*SHOOT_PWR;ball.vy=(dy/d)*SHOOT_PWR;p.cooldown=0.45;
+  const gy=H/2+(Math.random()-.5)*36;
+  const dx=gx-p.x,dy=gy-p.y,d=Math.hypot(dx,dy)||1;
+  ball.owner=null;ball.vx=(dx/d)*SHOOT_PWR;ball.vy=(dy/d)*SHOOT_PWR;
+  ball.spin=(p.y-gy)*0.12;
+  p.cooldown=0.45;
 }
 function aiPass(p){
   let best=null,bd=Infinity;
@@ -846,20 +868,54 @@ function aiGKBoot(p){
 // ════════════════════════════════════
 function updateBall(){
   if(ball.owner)return;
-  ball.x+=ball.vx;ball.y+=ball.vy;
-  ball.vx*=FRICTION;ball.vy*=FRICTION;
-  const s=Math.hypot(ball.vx,ball.vy);
-  if(s>MAX_BALL){ball.vx=ball.vx/s*MAX_BALL;ball.vy=ball.vy/s*MAX_BALL;}
+
+  // Magnus effect: spin curves the ball laterally
+  ball.vy+=ball.spin*0.016;
+  ball.spin*=0.975;
+
+  ball.x+=ball.vx; ball.y+=ball.vy;
+
+  // Visual rotation: ball rolls based on horizontal speed
+  ball.angle+=ball.vx*0.065;
+
+  // Speed-adaptive friction: fast ball slows faster, slow ball rolls smoothly
+  const spd=Math.hypot(ball.vx,ball.vy);
+  if(spd<0.08){ball.vx=0;ball.vy=0;}
+  else{
+    const fr=spd>7?0.963:spd>3?0.975:0.987;
+    ball.vx*=fr; ball.vy*=fr;
+  }
+
+  // Speed cap
+  if(spd>MAX_BALL){ball.vx=ball.vx/spd*MAX_BALL;ball.vy=ball.vy/spd*MAX_BALL;}
+
+  // Goal / wall collisions
   const inY=ball.y>=GT&&ball.y<=GB;
-  if(ball.y-ball.r<PY){ball.y=PY+ball.r;ball.vy=Math.abs(ball.vy)*.7;}
-  if(ball.y+ball.r>PY+PH){ball.y=PY+PH-ball.r;ball.vy=-Math.abs(ball.vy)*.7;}
+  if(ball.y-ball.r<PY){
+    ball.y=PY+ball.r;
+    ball.vy=Math.abs(ball.vy)*.72;
+    ball.spin*=-0.55; // spin reverses on side bounce
+  }
+  if(ball.y+ball.r>PY+PH){
+    ball.y=PY+PH-ball.r;
+    ball.vy=-Math.abs(ball.vy)*.72;
+    ball.spin*=-0.55;
+  }
   if(ball.x-ball.r<PX){
     if(inY&&ball.x<PX-GD){onGoal(1);return;}
-    else if(!inY){ball.x=PX+ball.r;ball.vx=Math.abs(ball.vx)*.7;}
+    else if(!inY){
+      ball.x=PX+ball.r;
+      ball.vx=Math.abs(ball.vx)*.7;
+      ball.vy+=ball.spin*0.1; // spin deflects off wall
+    }
   }
   if(ball.x+ball.r>PX+PW){
     if(inY&&ball.x>PX+PW+GD){onGoal(0);return;}
-    else if(!inY){ball.x=PX+PW-ball.r;ball.vx=-Math.abs(ball.vx)*.7;}
+    else if(!inY){
+      ball.x=PX+PW-ball.r;
+      ball.vx=-Math.abs(ball.vx)*.7;
+      ball.vy+=ball.spin*0.1;
+    }
   }
 }
 
@@ -876,6 +932,7 @@ function onGoal(team){
 }
 function resetKickoff(){
   ball.x=W/2;ball.y=H/2;ball.vx=0;ball.vy=0;ball.owner=null;
+  ball.spin=0;ball.angle=0;
   for(const p of players){p.x=p.homeX;p.y=p.homeY;p.sliding=false;p.blocking=false;p.cooldown=0.7;}
 }
 function tick(){
@@ -942,11 +999,56 @@ function drawPitch(){
 
 function drawBall(){
   ctx.save();
-  ctx.shadowBlur=14;ctx.shadowColor='#fff';
+
+  // Ground shadow (ellipse, slightly behind ball movement)
+  ctx.beginPath();
+  ctx.ellipse(ball.x+2,ball.y+ball.r*0.9,ball.r*1.05,ball.r*0.38,0,0,Math.PI*2);
+  ctx.fillStyle='rgba(0,0,0,0.2)';ctx.fill();
+
+  // Clip to circle for interior drawing
   ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
-  ctx.fillStyle='#f1f5f9';ctx.fill();
-  ctx.strokeStyle='#334155';ctx.lineWidth=1.2;ctx.stroke();
-  ctx.fillStyle='#1e293b';ctx.beginPath();ctx.arc(ball.x-3,ball.y-2,4,0,Math.PI*2);ctx.fill();
+  ctx.clip();
+
+  // White base
+  ctx.fillStyle='#edf2f7';
+  ctx.fillRect(ball.x-ball.r,ball.y-ball.r,ball.r*2,ball.r*2);
+
+  // Rotating black pentagon patches (soccer ball look)
+  ctx.save();
+  ctx.translate(ball.x,ball.y);
+  ctx.rotate(ball.angle);
+  const pg=ball.r*0.37;
+  ctx.fillStyle='#1a2535';
+  // Center pentagon
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a=(i/5)*Math.PI*2-Math.PI/2;
+    i===0?ctx.moveTo(Math.cos(a)*pg,Math.sin(a)*pg):ctx.lineTo(Math.cos(a)*pg,Math.sin(a)*pg);
+  }
+  ctx.closePath();ctx.fill();
+  // Offset second patch
+  const ox=ball.r*0.52,oy=-ball.r*0.4;
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const a=(i/5)*Math.PI*2;
+    i===0?ctx.moveTo(ox+Math.cos(a)*pg*0.66,oy+Math.sin(a)*pg*0.66):ctx.lineTo(ox+Math.cos(a)*pg*0.66,oy+Math.sin(a)*pg*0.66);
+  }
+  ctx.closePath();ctx.fill();
+  ctx.restore();
+
+  ctx.restore(); // end clip
+
+  // Outer glow + outline
+  ctx.save();
+  ctx.shadowBlur=10;ctx.shadowColor='rgba(255,255,255,0.5)';
+  ctx.beginPath();ctx.arc(ball.x,ball.y,ball.r,0,Math.PI*2);
+  ctx.strokeStyle='rgba(148,163,184,0.75)';ctx.lineWidth=0.8;ctx.stroke();
+  ctx.restore();
+
+  // Gloss highlight (top-left)
+  ctx.save();
+  ctx.beginPath();ctx.arc(ball.x-ball.r*0.27,ball.y-ball.r*0.27,ball.r*0.26,0,Math.PI*2);
+  ctx.fillStyle='rgba(255,255,255,0.32)';ctx.fill();
   ctx.restore();
 }
 
