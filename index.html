@@ -202,10 +202,10 @@ let cpuTeam      = null;
 //  DIFFICULTIES
 // ════════════════════════════════════
 const DIFFICULTIES = [
-  { name:'Easy',       emoji:'😊', desc:'Slow reactions · Makes mistakes',          color:'#22c55e', aiSpd:1.3, gkSpd:1.8, shootChance:0.012, pressMax:0,    blockChance:0.03, slideChance:0.004, brainMult:0.3 },
-  { name:'Normal',     emoji:'⚽', desc:'Balanced challenge · Learns from you',     color:'#38bdf8', aiSpd:1.9, gkSpd:2.8, shootChance:0.030, pressMax:0.35, blockChance:0.06, slideChance:0.012, brainMult:1.0 },
-  { name:'Hard',       emoji:'💪', desc:'Aggressive pressing · Fast reactions',      color:'#f59e0b', aiSpd:2.7, gkSpd:3.7, shootChance:0.055, pressMax:0.60, blockChance:0.11, slideChance:0.022, brainMult:2.0 },
-  { name:'Impossible', emoji:'💀', desc:'Relentless · Perfect AI · No mercy',       color:'#f87171', aiSpd:3.5, gkSpd:4.8, shootChance:0.080, pressMax:0.90, blockChance:0.18, slideChance:0.034, brainMult:3.5 },
+  { name:'Easy',       emoji:'😊', desc:'Slow reactions · Makes mistakes',          color:'#22c55e', aiSpd:1.3, gkSpd:1.4, shootChance:0.012, pressMax:0,    blockChance:0.02, slideChance:0.004, brainMult:0.3 },
+  { name:'Normal',     emoji:'⚽', desc:'Balanced challenge · Learns from you',     color:'#38bdf8', aiSpd:1.9, gkSpd:2.2, shootChance:0.030, pressMax:0.35, blockChance:0.05, slideChance:0.012, brainMult:1.0 },
+  { name:'Hard',       emoji:'💪', desc:'Aggressive pressing · Fast reactions',      color:'#f59e0b', aiSpd:2.7, gkSpd:3.0, shootChance:0.055, pressMax:0.60, blockChance:0.09, slideChance:0.022, brainMult:2.0 },
+  { name:'Impossible', emoji:'💀', desc:'Elite challenge · You can win... maybe',   color:'#f87171', aiSpd:2.8, gkSpd:3.6, shootChance:0.060, pressMax:0.70, blockChance:0.12, slideChance:0.026, brainMult:2.2 },
 ];
 let selectedDiff = 1;   // default Normal
 let diff = DIFFICULTIES[1];
@@ -298,7 +298,7 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 const W=1100,H=660;
 const PX=30,PY=20,PW=W-PX*2,PH=H-PY*2;
-const GH=74, GD=18;
+const GH=115, GD=18;
 const GT=PY+(PH-GH)/2, GB=GT+GH;
 
 // ── Slower speeds ──────────────────
@@ -886,12 +886,22 @@ function updateAI(p){
       }
     } else if(ball.owner?.team===0
            || (!ball.owner && lastBallTeam===0 && Math.hypot(ball.vx,ball.vy)>1.2)){
-      // Teammate has ball -OR- ball is still moving from OUR pass → hold triangle
+      // Our team has ball or ball is from our pass → hold triangle
       const sp=getSpreadPos(p);
       moveTo(p,sp.x,sp.y,spd*0.93);
+    } else if(!ball.owner){
+      // LOOSE BALL: closest user field player sprints to win it
+      const myD=dist(p,ball);
+      const isClosest=!players.some(q=>q.team===0&&q.role!=='goalkeeper'&&!q.isUser&&q!==p&&dist(q,ball)<myD);
+      if(isClosest&&myD<300){
+        moveTo(p,ball.x,ball.y,spd*1.2); // sprint!
+      } else {
+        const sp=getSpreadPos(p);
+        moveTo(p,sp.x,sp.y,spd*0.88);
+      }
     } else {
-      // CPU has ball or possession truly lost → fall back to defensive home shape
-      moveTo(p,p.homeX,p.homeY,spd);
+      // CPU has ball → press the ball carrier, don't just go home
+      moveTo(p,ball.owner.x,ball.owner.y,spd*0.9);
     }
     clamp(p);return;
   }
