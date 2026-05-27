@@ -328,11 +328,9 @@ document.addEventListener('keydown',e=>{
     if(e.key==='2') switchTo(1);
     if(e.key==='3') switchTo(2);
     if(e.key==='4') switchTo(3);
-    if(e.key==='s'||e.key==='S') doShoot();
-    if(e.key==='w'||e.key==='W') doPass();
+    // S, W, A are charge-based — detected by key-hold in updateCharges()
     if(e.key==='e'||e.key==='E') doSlide();
     if((e.key==='d'||e.key==='D')&&userPlayer?.role==='goalkeeper') doBlock();
-    if((e.key==='a'||e.key==='A')&&userPlayer?.role==='goalkeeper') doGKBoot();
     if(e.key==='q'||e.key==='Q') doJuke();
   }
 });
@@ -399,6 +397,11 @@ let timerTick=null;
 let players=[],userTeam=[],userPlayer=null;
 let goalAnim=0,goalTeam=-1;
 let rafId=null,lastTs=0;
+// ════════════════════════════════════
+//  CHARGE STATE
+// ════════════════════════════════════
+let chargeS=0,chargeW=0,chargeA=0;
+let sHeld=false,wHeld=false,aHeld=false;
 
 // ════════════════════════════════════
 //  BALL
@@ -641,22 +644,29 @@ function findOpenMate(p){
   return best;
 }
 function getSpreadPos(p){
+  // △ TRIANGLE FORMATION RULE:
+  // Each player owns a dedicated Y-lane so no two ever share a horizontal line.
+  // X offsets per lane prevent vertical alignment → always a true triangle.
+  //   playerNum 1 (Attacker)  → TOP lane    (y ≈ 24%)  push far forward
+  //   playerNum 2 (Midfielder)→ BOTTOM lane (y ≈ 76%)  push moderately forward
+  //   playerNum 3 (Defender)  → CENTER lane (y ≈ 50%)  stay safely behind
   const bx=ball.owner?ball.owner.x:ball.x;
-  const by=ball.owner?ball.owner.y:ball.y;
-  if(p.playerNum===1){ // attacker: push far forward into dangerous space
-    const ax=Math.min(PX+PW-p.r-40,bx+270);
-    const ay=by<H*0.5?H*0.73:H*0.27; // wide channel opposite to ball
-    return{x:ax,y:ay};
+  const attacking=ball.owner?ball.owner.team===0:bx>W*0.5;
+
+  if(p.playerNum===1){
+    // Attacker → top lane, as far forward as possible
+    const fx=Math.min(PX+PW-p.r-45, attacking?bx+255:bx+65);
+    return{x:fx+18, y:H*0.23}; // +18 X stagger ensures no vertical alignment with MID
   }
-  if(p.playerNum===2){ // midfielder: central support, ahead of ball
-    const mx=Math.min(PX+PW-p.r-120,Math.max(W*0.42,bx+90));
-    const my=by<H*0.5?H*0.58:H*0.42;
-    return{x:mx,y:my};
+  if(p.playerNum===2){
+    // Midfielder → bottom lane, moderate depth
+    const mx=Math.min(PX+PW-p.r-115, Math.max(W*0.40, attacking?bx+100:bx-20));
+    return{x:mx-18, y:H*0.77}; // -18 X stagger
   }
-  if(p.playerNum===3){ // defender: wide outlet, safely behind ball
-    const sx=Math.max(PX+p.r+25,Math.min(W*0.36,bx-210));
-    const sy=by<H*0.52?H*0.76:H*0.24;
-    return{x:sx,y:sy};
+  if(p.playerNum===3){
+    // Defender → center lane, always behind ball
+    const sx=Math.max(PX+p.r+30, Math.min(W*0.38, bx-205));
+    return{x:sx, y:H*0.50}; // no X stagger needed – center is the triangle's base vertex
   }
   return{x:p.homeX,y:p.homeY};
 }
@@ -677,18 +687,19 @@ function switchTo(idx){
 // ════════════════════════════════════
 //  ACTIONS
 // ════════════════════════════════════
-function doShoot(){
+function doShoot(power=1){
   if(!userPlayer)return;
   if(ball.owner!==userPlayer){if(dist(userPlayer,ball)>55)return;ball.owner=null;}
   const gx=userPlayer.team===0?PX+PW+GD:PX-GD;
   const gy=H/2+(Math.random()-.5)*38;
   const dx=gx-userPlayer.x,dy=gy-userPlayer.y,d=Math.hypot(dx,dy)||1;
-  ball.owner=null;ball.vx=(dx/d)*SHOOT_PWR;ball.vy=(dy/d)*SHOOT_PWR;
-  ball.spin=(userPlayer.y-gy)*0.18; // lateral offset creates spin/curve
+  const pwr=SHOOT_PWR*(0.38+0.62*power); // 38% tap → 100% full charge
+  ball.owner=null;ball.vx=(dx/d)*pwr;ball.vy=(dy/d)*pwr;
+  ball.spin=(userPlayer.y-gy)*0.18;
   userPlayer.cooldown=0.45;
   brain.recordShot(gy);
 }
-function doPass(){
+function doPass(power=1){
   if(!userPlayer||ball.owner!==userPlayer)return;
   let best=null,bs=-Infinity;
   for(const p of players){
@@ -699,9 +710,10 @@ function doPass(){
   }
   if(!best)return;
   const dx=best.x-userPlayer.x,dy=best.y-userPlayer.y,d=Math.hypot(dx,dy)||1;
-  ball.owner=null;ball.vx=(dx/d)*PASS_PWR;ball.vy=(dy/d)*PASS_PWR;
+  const pwr=PASS_PWR*(0.45+0.55*power); // 45% tap → 100% full charge
+  ball.owner=null;ball.vx=(dx/d)*pwr;ball.vy=(dy/d)*pwr;
   userPlayer.cooldown=0.25;
-  brain.recordPass();  // AI learns you pass frequently
+  brain.recordPass();
 }
 function doSlide(){
   if(!userPlayer||userPlayer.sliding||userPlayer.slideCd>0)return;
@@ -715,14 +727,83 @@ function doBlock(){
   if(!userPlayer||userPlayer.blockCd>0)return;
   userPlayer.blocking=true;userPlayer.blockT=0.65;userPlayer.blockCd=1.3;
 }
-function doGKBoot(){
+function doGKBoot(power=1){
   if(!userPlayer)return;
   if(ball.owner!==userPlayer&&dist(userPlayer,ball)>65)return;
   const tx=userPlayer.team===0?PX+PW*.65:PX+PW*.35;
   const ty=H/2+(Math.random()-.5)*100;
   const dx=tx-userPlayer.x,dy=ty-userPlayer.y,d=Math.hypot(dx,dy)||1;
-  ball.owner=null;ball.vx=(dx/d)*BOOT_PWR;ball.vy=(dy/d)*BOOT_PWR;
+  const pwr=BOOT_PWR*(0.42+0.58*power); // 42% tap → 100% full charge
+  ball.owner=null;ball.vx=(dx/d)*pwr;ball.vy=(dy/d)*pwr;
   userPlayer.cooldown=0.4;
+}
+
+// ════════════════════════════════════
+//  CHARGE SYSTEM
+// ════════════════════════════════════
+function updateCharges(dt){
+  if(!userPlayer||gameState!=='playing'){
+    chargeS=chargeW=chargeA=0;sHeld=wHeld=aHeld=false;return;
+  }
+  const isGK=userPlayer.role==='goalkeeper';
+  const sDown=keys['s']||keys['S'];
+  const wDown=keys['w']||keys['W'];
+  const aDown=keys['a']||keys['A'];
+
+  if(!isGK){
+    // ── SHOOT (S) — field players only
+    if(sDown&&!userPlayer.sliding&&!userPlayer.juking){
+      if(!sHeld){sHeld=true;chargeS=0.12;} // 12% = minimum power on first frame
+      chargeS=Math.min(1,chargeS+dt/1.1);
+    }else if(sHeld){
+      doShoot(chargeS);sHeld=false;chargeS=0;
+    }
+    // ── PASS (W) — only while holding the ball
+    if(wDown&&ball.owner===userPlayer){
+      if(!wHeld){wHeld=true;chargeW=0.15;}
+      chargeW=Math.min(1,chargeW+dt/0.85);
+    }else if(wHeld){
+      doPass(chargeW);wHeld=false;chargeW=0;
+    }else{
+      wHeld=false;chargeW=0;
+    }
+    aHeld=false;chargeA=0; // clear GK charge if switched away
+  } else {
+    // ── GK BOOT (A)
+    sHeld=false;chargeS=0;wHeld=false;chargeW=0;
+    if(aDown){
+      if(!aHeld){aHeld=true;chargeA=0.12;}
+      chargeA=Math.min(1,chargeA+dt/0.9);
+    }else if(aHeld){
+      doGKBoot(chargeA);aHeld=false;chargeA=0;
+    }
+  }
+}
+function drawChargeArcs(){
+  if(!userPlayer||gameState!=='playing')return;
+  const isGK=userPlayer.role==='goalkeeper';
+  if(!isGK&&chargeS>0.04) drawPowerArc(userPlayer,chargeS,'#f87171','SHOOT');
+  if(!isGK&&chargeW>0.04) drawPowerArc(userPlayer,chargeW,'#38bdf8','PASS');
+  if(isGK &&chargeA>0.04) drawPowerArc(userPlayer,chargeA,'#fbbf24','BOOT');
+}
+function drawPowerArc(player,charge,color,label){
+  const r=player.r+14;
+  const full=charge>0.9;
+  ctx.save();
+  // Dark background ring
+  ctx.beginPath();ctx.arc(player.x,player.y,r,0,Math.PI*2);
+  ctx.strokeStyle='rgba(0,0,0,0.5)';ctx.lineWidth=3.5;ctx.stroke();
+  // Charge fill arc (grows clockwise from top)
+  ctx.beginPath();
+  ctx.arc(player.x,player.y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*charge);
+  ctx.strokeStyle=full?'#ffffff':color;ctx.lineWidth=3.5;
+  if(full){ctx.shadowBlur=14;ctx.shadowColor=color;}
+  ctx.stroke();ctx.shadowBlur=0;
+  // Label above
+  ctx.font='bold 9px system-ui';ctx.textAlign='center';
+  ctx.fillStyle=full?'#fff':color;
+  ctx.fillText(label,player.x,player.y-r-4);
+  ctx.restore();
 }
 
 // ════════════════════════════════════
@@ -831,25 +912,27 @@ function updateAI(p){
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
   } else {
-    // CPU teammate has ball: rank by homeX and spread into 3 zones
+    // CPU teammate has ball → CPU forms its own TRIANGLE
+    // Rank by homeX (ascending = most advanced toward PX / left goal)
     const cpuFields=players
       .filter(q=>q.team===1&&q.role!=='goalkeeper')
-      .sort((a,b)=>a.homeX-b.homeX); // lowest homeX = most advanced toward PX
+      .sort((a,b)=>a.homeX-b.homeX);
     const rank=cpuFields.indexOf(p); // 0=attacker, 1=midfielder, 2=defender
+    // Mirror of user triangle: CPU att=BOTTOM lane, CPU mid=TOP lane, CPU def=CENTER
+    // (mirrored Y because CPU attacks left, so "dangerous" space is near PX)
+    const bx2=ball.owner?ball.owner.x:ball.x;
     if(rank===0){
-      // Attacker: push into dangerous position near user goal
-      const ax=Math.max(PX+p.r+55,ball.x-260);
-      const ay=ball.y<H/2?H*0.73:H*0.27;
-      moveTo(p,ax,ay,spd*0.9);
+      // CPU Attacker → bottom lane, press deep into user half
+      const ax=Math.max(PX+p.r+50, bx2-265);
+      moveTo(p,ax-18,H*0.77,spd*0.9);
     } else if(rank===1){
-      // Midfielder: central support one step behind
-      const mx=Math.min(PX+PW-p.r-100,Math.max(W*0.45,ball.x-90));
-      const my=ball.y<H/2?H*0.55:H*0.45;
-      moveTo(p,mx,my,spd*0.78);
+      // CPU Midfielder → top lane, central-forward support
+      const mx=Math.min(PX+PW-p.r-100,Math.max(W*0.44, bx2-90));
+      moveTo(p,mx+18,H*0.23,spd*0.78);
     } else {
-      // Defender: safe outlet position behind ball
-      const sx=Math.min(PX+PW-p.r-30,ball.x+165);
-      moveTo(p,sx,p.homeY,spd*0.7);
+      // CPU Defender → center lane, safe outlet
+      const sx=Math.min(PX+PW-p.r-30, bx2+160);
+      moveTo(p,sx,H*0.50,spd*0.7);
     }
   }
   clamp(p);
@@ -1086,7 +1169,7 @@ function drawOverlay(){
   if(ball.owner===userPlayer||isGK){
     ctx.fillStyle='rgba(0,0,0,.48)';rRect(ctx,W/2-148,PY+5,296,22,6);ctx.fill();
     ctx.fillStyle='rgba(255,255,255,.7)';ctx.font='11px system-ui';ctx.textAlign='center';
-    ctx.fillText(isGK?'[A] Boot  [D] Block  [⇧] Sprint':'[S] Shoot  [W] Pass  [E] Slide  [⇧] Sprint',W/2,PY+19);
+    ctx.fillText(isGK?'[Hold A] Boot  [D] Block  [⇧] Sprint':'[Hold S] Shoot  [Hold W] Pass  [E] Slide  [Q] Juke',W/2,PY+19);
   }
   if(isGK){
     ctx.fillStyle='rgba(251,191,36,.1)';ctx.strokeStyle='#fbbf24';ctx.lineWidth=1.5;
@@ -1122,6 +1205,7 @@ function loop(ts){
   drawPitch();
   if(gameState==='playing'||gameState==='goal'){
     if(gameState==='playing'){
+      updateCharges(dt); // charge shoot/pass/boot
       // Sample user position every 2s for spatial learning
       brain.posTimer-=dt;
       if(brain.posTimer<=0){brain.samplePos(userPlayer);brain.posTimer=2;}
@@ -1132,6 +1216,7 @@ function loop(ts){
     for(const p of players){if(!p.isUser)p.draw();}
     if(userPlayer)userPlayer.draw();
     drawBall();
+    drawChargeArcs();
     drawGoalFlash(dt);
     drawOverlay();
   }
