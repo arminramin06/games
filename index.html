@@ -150,6 +150,7 @@ kbd{
   <div class="ctrl"><kbd>1</kbd>–<kbd>4</kbd> Switch</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
+  <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">R</kbd> Steal</div>
 </div>
 
 <!-- Splash -->
@@ -592,6 +593,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='e'||e.key==='E') doSlide();
     if((e.key==='d'||e.key==='D')&&userPlayer?.role==='goalkeeper') doBlock();
     if(e.key==='q'||e.key==='Q') doJuke();
+    if(e.key==='r'||e.key==='R') doSteal();
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
@@ -737,6 +739,8 @@ class Player {
     this.blocking=false;this.blockT=0;this.blockCd=0;
     this.juking=false;this.jukeT=0;this.jukeDx=0;this.jukeDy=0;this.jukeCd=0;
     this.cooldown=0;
+    this.stealCd=0;  // steal cooldown
+    this.stealT=0;   // steal flash timer (>0 = success, <0 = fail)
     this.homeX=x;this.homeY=y;
   }
   get spd(){
@@ -748,6 +752,8 @@ class Player {
     if(this.cooldown>0) this.cooldown-=dt;
     if(this.blockCd>0)  this.blockCd-=dt;
     if(this.slideCd>0)  this.slideCd-=dt;
+    if(this.stealCd>0)  this.stealCd-=dt;
+    if(this.stealT!==0) this.stealT=this.stealT>0?Math.max(0,this.stealT-dt):Math.min(0,this.stealT+dt);
     if(this.blockT>0){  this.blockT-=dt;if(this.blockT<=0)this.blocking=false;}
 
     if(this.jukeCd>0) this.jukeCd-=dt;
@@ -826,6 +832,20 @@ class Player {
       ctx.beginPath();ctx.ellipse(this.x,this.y,this.r*2.8,this.r*1.1,0,0,Math.PI*2);
       ctx.fillStyle=this.team===0?'rgba(56,189,248,.2)':'rgba(248,113,113,.2)';ctx.fill();
       ctx.strokeStyle=this.team===0?'#38bdf8':'#f87171';ctx.lineWidth=2;ctx.stroke();
+    }
+    // Steal flash ring
+    if(this.stealT!==0){
+      const t=Math.abs(this.stealT);
+      ctx.save();
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r+7,0,Math.PI*2);
+      if(this.stealT>0){ctx.strokeStyle=`rgba(74,222,128,${t})`;ctx.shadowColor='#4ade80';ctx.shadowBlur=12;}
+      else{ctx.strokeStyle=`rgba(248,113,113,${t})`;ctx.shadowColor='#f87171';ctx.shadowBlur=8;}
+      ctx.lineWidth=3.5;ctx.stroke();ctx.shadowBlur=0;
+      if(this.stealT>0.4){
+        ctx.font='bold 10px system-ui';ctx.textAlign='center';
+        ctx.fillStyle='#4ade80';ctx.fillText('STEAL!',this.x,this.y-this.r-10);
+      }
+      ctx.restore();
     }
     // Jersey
     drawJersey(this.x,this.y,this.r,this.jerseyData,this.role==='goalkeeper',this.number);
@@ -934,6 +954,50 @@ function getSpreadPos(p){
 function aiPassTo(p,target){
   const dx=target.x-p.x,dy=target.y-p.y,d=Math.hypot(dx,dy)||1;
   ball.owner=null;ball.vx=(dx/d)*PASS_PWR;ball.vy=(dy/d)*PASS_PWR;p.cooldown=0.3;
+}
+
+
+// ════════════════════════════════════
+//  STEAL ACTION  (R key)
+// ════════════════════════════════════
+function doSteal(){
+  if(!userPlayer||userPlayer.sliding||userPlayer.juking||userPlayer.stealCd>0) return;
+  // Find nearest opponent within steal range
+  let target=null, closestD=Infinity;
+  for(const p of players){
+    if(p.team===userPlayer.team) continue;
+    const d=dist(userPlayer,p);
+    if(d<60&&d<closestD){closestD=d;target=p;}
+  }
+  if(!target) return; // nobody to steal from
+
+  userPlayer.stealCd=3.2; // 3.2s cooldown – can't spam
+
+  if(ball.owner===target){
+    // TARGET HAS BALL: attempt contested steal
+    const successChance = target.role==='goalkeeper' ? 0.35 : 0.55;
+    if(Math.random()<successChance){
+      // SUCCESS: take the ball
+      ball.owner=userPlayer;
+      userPlayer.stealT=0.75;  // positive = green flash
+      userPlayer.cooldown=0.2;
+    } else {
+      // FAIL: brief penalty – both players knocked back slightly
+      userPlayer.stealT=-0.55; // negative = red flash
+      userPlayer.cooldown=0.4;
+      // Give opponent a tiny burst of speed away
+      const dx=target.x-userPlayer.x, dy=target.y-userPlayer.y, d=Math.hypot(dx,dy)||1;
+      target.x+=dx/d*8; target.y+=dy/d*8;
+    }
+  } else {
+    // TARGET DOESN'T HAVE BALL: body challenge (intercept position)
+    // Push them slightly off their run – no ball transfer
+    const dx=target.x-userPlayer.x, dy=target.y-userPlayer.y, d=Math.hypot(dx,dy)||1;
+    target.x+=dx/d*5; target.y+=dy/d*5;
+    target.cooldown=Math.max(target.cooldown,0.25);
+    userPlayer.stealT=-0.25; // small fail flash
+    userPlayer.cooldown=0.2;
+  }
 }
 
 // ════════════════════════════════════
