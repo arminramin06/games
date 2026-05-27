@@ -140,6 +140,7 @@ kbd{
   <div class="ctrl"><kbd>S</kbd> Shoot</div>
   <div class="ctrl"><kbd>W</kbd> Pass</div>
   <div class="ctrl"><kbd>E</kbd> Slide (6s cd)</div>
+  <div class="ctrl"><kbd>Q</kbd> Juke</div>
   <div class="ctrl"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> Switch</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
@@ -331,6 +332,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='e'||e.key==='E') doSlide();
     if((e.key==='d'||e.key==='D')&&userPlayer?.role==='goalkeeper') doBlock();
     if((e.key==='a'||e.key==='A')&&userPlayer?.role==='goalkeeper') doGKBoot();
+    if(e.key==='q'||e.key==='Q') doJuke();
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
@@ -466,8 +468,9 @@ class Player {
     this.isUser=false;
     this.playerNum=0;
     this.sliding=false;this.slideDx=0;this.slideDy=0;this.slideT=0;
-    this.slideCd=0;    // cooldown after slide
+    this.slideCd=0;
     this.blocking=false;this.blockT=0;this.blockCd=0;
+    this.juking=false;this.jukeT=0;this.jukeDx=0;this.jukeDy=0;this.jukeCd=0;
     this.cooldown=0;
     this.homeX=x;this.homeY=y;
   }
@@ -481,6 +484,15 @@ class Player {
     if(this.blockCd>0)  this.blockCd-=dt;
     if(this.slideCd>0)  this.slideCd-=dt;
     if(this.blockT>0){  this.blockT-=dt;if(this.blockT<=0)this.blocking=false;}
+
+    if(this.jukeCd>0) this.jukeCd-=dt;
+    if(this.juking){
+      this.jukeT-=dt;
+      this.x+=this.jukeDx;this.y+=this.jukeDy;clamp(this);
+      if(ball.owner===this){const dir=this.team===0?1:-1;ball.x=this.x+dir*(this.r+ball.r+1);ball.y=this.y;ball.vx=0;ball.vy=0;}
+      if(this.jukeT<=0)this.juking=false;
+      return;
+    }
 
     if(this.sliding){
       this.slideT-=dt;
@@ -537,6 +549,13 @@ class Player {
     // Ground shadow
     ctx.beginPath();ctx.ellipse(this.x,this.y+this.r,this.r*.85,this.r*.27,0,0,Math.PI*2);
     ctx.fillStyle='rgba(0,0,0,.28)';ctx.fill();
+    // Juke motion trail
+    if(this.juking){
+      ctx.globalAlpha=.2;ctx.fillStyle='#a78bfa';
+      ctx.beginPath();ctx.arc(this.x-this.jukeDx*4,this.y-this.jukeDy*4,this.r*.62,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(this.x-this.jukeDx*2.2,this.y-this.jukeDy*2.2,this.r*.46,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
     // Block glow
     if(this.blocking){
       ctx.beginPath();ctx.ellipse(this.x,this.y,this.r*2.8,this.r*1.1,0,0,Math.PI*2);
@@ -556,12 +575,17 @@ class Player {
       ctx.lineTo(this.x-5,this.y-this.r-4);ctx.lineTo(this.x+5,this.y-this.r-4);
       ctx.closePath();ctx.fill();
     }
-    // Slide cooldown ring
+    // Slide cooldown ring (yellow, r+7)
     if(this.isUser&&this.slideCd>0){
       const pct=1-(this.slideCd/SLIDE_CD);
-      ctx.beginPath();
-      ctx.arc(this.x,this.y,this.r+7,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r+7,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
       ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.stroke();
+    }
+    // Juke cooldown ring (purple, r+10)
+    if(this.isUser&&this.jukeCd>0){
+      const pct=1-(this.jukeCd/2.0);
+      ctx.beginPath();ctx.arc(this.x,this.y,this.r+10,-Math.PI/2,-Math.PI/2+Math.PI*2*pct);
+      ctx.strokeStyle='rgba(167,139,250,.75)';ctx.lineWidth=1.5;ctx.stroke();
     }
     // Player number badge (user team non-selected)
     if(this.team===0&&!this.isUser){
@@ -590,6 +614,43 @@ function clamp(p){
 function moveTo(p,tx,ty,spd){
   const dx=tx-p.x,dy=ty-p.y,d=Math.hypot(dx,dy)||1;
   if(d>3){p.x+=(dx/d)*spd;p.y+=(dy/d)*spd;}
+}
+
+// ════════════════════════════════════
+//  AI HELPERS
+// ════════════════════════════════════
+function findOpenMate(p){
+  // Find teammate in most open space (fewest opponents nearby) and forward
+  let best=null,bs=-Infinity;
+  for(const t of players){
+    if(t===p||t.team!==p.team)continue;
+    let minOD=Infinity;
+    for(const o of players){if(o.team===p.team)continue;minOD=Math.min(minOD,dist(t,o));}
+    const fwd=p.team===0?t.x-p.x:p.x-t.x;
+    const s=minOD*0.3+Math.max(0,fwd)*0.7;
+    if(minOD>60&&s>bs){bs=s;best=t;}
+  }
+  return best;
+}
+function getSpreadPos(p){
+  // Return where this user AI teammate should spread to
+  const bx=ball.owner?ball.owner.x:ball.x;
+  const by=ball.owner?ball.owner.y:ball.y;
+  if(p.playerNum===1){ // defender: support position behind ball carrier
+    const sx=Math.max(PX+p.r+20,bx-155);
+    return{x:sx,y:p.homeY};
+  }
+  if(p.playerNum===2){ // attacker: push wide and forward into space
+    const ax=Math.min(PX+PW-p.r-65,bx+210);
+    // Spread to opposite vertical half from ball
+    const ay=by<H*0.5?H*0.68:H*0.32;
+    return{x:ax,y:ay};
+  }
+  return{x:p.homeX,y:p.homeY};
+}
+function aiPassTo(p,target){
+  const dx=target.x-p.x,dy=target.y-p.y,d=Math.hypot(dx,dy)||1;
+  ball.owner=null;ball.vx=(dx/d)*PASS_PWR;ball.vy=(dy/d)*PASS_PWR;p.cooldown=0.3;
 }
 
 // ════════════════════════════════════
@@ -652,19 +713,55 @@ function doGKBoot(){
 }
 
 // ════════════════════════════════════
+//  JUKE ACTION
+// ════════════════════════════════════
+function doJuke(){
+  if(!userPlayer||userPlayer.sliding||userPlayer.juking||userPlayer.jukeCd>0)return;
+  let jx=0,jy=0;
+  // Find nearest opponent
+  let nearOpp=null,nearD=Infinity;
+  for(const p of players){
+    if(p.team===userPlayer.team)continue;
+    const d=dist(userPlayer,p);if(d<nearD){nearD=d;nearOpp=p;}
+  }
+  if(nearOpp&&nearD<130){
+    // Dodge perpendicular to the direction toward opponent
+    const dx=nearOpp.x-userPlayer.x,dy=nearOpp.y-userPlayer.y,d=Math.hypot(dx,dy)||1;
+    // Two perpendicular options
+    const p1x=-dy/d,p1y=dx/d;
+    const p2x=dy/d,p2y=-dx/d;
+    // Pick the one that advances more toward goal
+    const gx=userPlayer.team===0?PX+PW:PX;
+    const s1=p1x*(gx-userPlayer.x),s2=p2x*(gx-userPlayer.x);
+    if(s1>=s2){jx=p1x;jy=p1y;}else{jx=p2x;jy=p2y;}
+  } else {
+    // No nearby opp: sidestep based on current arrow keys
+    const mx=keys['ArrowRight']?1:keys['ArrowLeft']?-1:0;
+    const my=keys['ArrowDown']?1:keys['ArrowUp']?-1:0;
+    if(mx||my){jx=-my||(Math.random()>.5?1:-1);jy=mx||0;}
+    else{jx=0;jy=Math.random()>.5?1:-1;}
+  }
+  const dl=Math.hypot(jx,jy)||1;jx/=dl;jy/=dl;
+  userPlayer.juking=true;
+  userPlayer.jukeT=0.21;
+  userPlayer.jukeDx=jx*7.5;
+  userPlayer.jukeDy=jy*7.5;
+  userPlayer.jukeCd=2.0;
+}
+
+// ════════════════════════════════════
 //  AI
 // ════════════════════════════════════
 function updateAI(p){
-  if(p.isUser||p.sliding||p.blocking)return;
+  if(p.isUser||p.sliding||p.blocking||p.juking)return;
   const atkX=p.team===0?PX+PW:PX;
-  const spd=p.spd;  // uses diff
+  const spd=p.spd;
 
+  // ── GOALKEEPER (both teams) ───────────────────────
   if(p.role==='goalkeeper'){
     const lineX=p.team===0?PX+20:PX+PW-20;
-    // ADAPTIVE: bias GK toward where player tends to shoot
-    const shotBias = p.team===1 ? brain.avgShotY * brain.shotConf * 0.75 : 0;
-    const rawY = ball.y + shotBias;
-    const tY=Math.max(GT+p.r,Math.min(GB-p.r,rawY));
+    const shotBias=p.team===1?brain.avgShotY*brain.shotConf*0.75:0;
+    const tY=Math.max(GT+p.r,Math.min(GB-p.r,ball.y+shotBias));
     moveTo(p,lineX,tY,spd);
     const closeX=p.team===0?PX+130:PX+PW-130;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
@@ -672,7 +769,6 @@ function updateAI(p){
     if(ball.owner===p&&Math.random()<0.04)aiGKBoot(p);
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      // ADAPTIVE + DIFFICULTY: block chance scales with both
       const blockChance=diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance;
       if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<blockChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
@@ -681,23 +777,46 @@ function updateAI(p){
     clamp(p);return;
   }
 
+  // ── USER TEAM AI (non-GK, non-user-controlled) ────
+  if(p.team===0){
+    if(ball.owner===p){
+      // Has ball: find open mate and pass, or shoot/dribble
+      const mate=findOpenMate(p);
+      if(mate&&dist(p,mate)>80&&Math.random()<0.028){
+        aiPassTo(p,mate);
+      } else {
+        moveTo(p,atkX-55,H/2,spd);
+        if(Math.abs(p.x-atkX)<240&&Math.random()<0.022)aiShoot(p,atkX);
+      }
+    } else if(!ball.owner||ball.owner.team!==0){
+      // CPU has ball or loose: retreat to home shape
+      moveTo(p,p.homeX,p.homeY,spd);
+    } else {
+      // Teammate has ball: spread into open space
+      const sp=getSpreadPos(p);
+      moveTo(p,sp.x,sp.y,spd*0.88);
+    }
+    clamp(p);return;
+  }
+
+  // ── CPU TEAM AI ───────────────────────────────────
   if(ball.owner===p){
     moveTo(p,atkX+(p.team===1?80:-80),H/2,spd);
-    // ADAPTIVE + DIFFICULTY shoot chance
     const shootChance=p.team===1?diff.shootChance+brain.passRate*diff.shootChance:diff.shootChance*0.4;
     if(Math.abs(p.x-atkX)<200&&Math.random()<shootChance)aiShoot(p,atkX);
-    if(Math.random()<0.007)aiPass(p);
+    // CPU passes to open teammate occasionally
+    if(Math.random()<0.009){
+      const mate=findOpenMate(p);
+      if(mate)aiPassTo(p,mate);
+    }
   } else if(!ball.owner||ball.owner.team!==p.team){
-    // ADAPTIVE + DIFFICULTY press intensity
     const pressMult=p.team===1?1+(1-brain.passRate)*brain.posConf*diff.pressMax:1;
     moveTo(p,ball.x,ball.y,spd*pressMult);
-    // DIFFICULTY slide chance
     if(dist(p,ball)<42&&ball.owner&&ball.owner.team!==p.team&&Math.random()<diff.slideChance){
       const dx=ball.x-p.x,dy=ball.y-p.y,d=Math.hypot(dx,dy)||1;
       p.sliding=true;p.slideT=0.28;p.slideDx=(dx/d)*5;p.slideDy=(dy/d)*5;p.slideCd=2;
     }
   } else {
-    // ADAPTIVE: defenders shade toward where player tends to roam
     const interceptX=p.team===1&&brain.posConf>0.3
       ? brain.avgX+(PX+PW<W/2?-50:50)
       : atkX+(p.team===0?-80:80);
