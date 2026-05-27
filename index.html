@@ -65,9 +65,15 @@ kbd{
 #team-select h2{font-size:32px;font-weight:900;margin-bottom:6px;}
 #team-select .sub{font-size:14px;color:rgba(255,255,255,.45);margin-bottom:24px;}
 .teams-grid{
-  display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
-  max-width:860px;
+  display:grid;grid-template-columns:repeat(8,1fr);gap:8px;
+  max-width:1160px;max-height:440px;overflow-y:auto;
 }
+.team-card{background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.08);border-radius:14px;padding:9px 5px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;transition:transform .15s,border-color .15s,background .15s;}
+.tourn-matchup{display:flex;align-items:center;gap:52px;margin:8px 0 4px;}
+.matchup-side{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:120px;font-size:14px;font-weight:700;}
+.tourn-other-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:5px;max-width:700px;max-height:200px;overflow:hidden;}
+.other-match-item{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:8px;padding:6px 10px;font-size:10.5px;color:rgba(255,255,255,.45);text-align:center;}
+@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-16px);}}
 .team-card{
   background:rgba(255,255,255,.04);border:2px solid rgba(255,255,255,.08);
   border-radius:14px;padding:16px 12px;cursor:pointer;
@@ -151,7 +157,8 @@ kbd{
   <div class="emoji">⚽</div>
   <h1>Soccer 2026</h1>
   <p>3v3 · Pick your team · Outscore the CPU<br>Arrow Keys move · Shift sprint · 1/2/3 switch player</p>
-  <button class="btn" onclick="showTeamSelect()">Choose Team &amp; Play</button>
+  <button class="btn" onclick="showTeamSelect()">Quick Match ⚽</button>
+  <button class="btn" style="background:linear-gradient(135deg,#92400e,#d97706);box-shadow:0 8px 32px rgba(146,64,14,.5);margin-top:14px;" onclick="startTournamentFlow()">🏆 Tournament Mode</button>
 </div>
 
 <!-- Team Select -->
@@ -176,6 +183,42 @@ kbd{
   </div>
 </div>
 
+<!-- Tournament Match Screen -->
+<div id="tourn-screen" class="screen hidden">
+  <div id="tourn-round-badge" style="font-size:13px;font-weight:800;letter-spacing:.12em;color:#fbbf24;text-transform:uppercase;margin-bottom:16px;"></div>
+  <div class="tourn-matchup">
+    <div class="matchup-side" id="tourn-you"></div>
+    <div style="font-size:42px;font-weight:900;color:rgba(255,255,255,.2);">VS</div>
+    <div class="matchup-side" id="tourn-opp"></div>
+  </div>
+  <button class="btn" style="margin:22px 0 14px;" onclick="playTournamentMatch()">▶ Play Match</button>
+  <div style="font-size:10px;font-weight:700;letter-spacing:.12em;color:rgba(255,255,255,.28);text-transform:uppercase;margin-bottom:9px;">Other Matches This Round</div>
+  <div id="tourn-other-matches" class="tourn-other-grid"></div>
+  <button class="btn red" style="margin-top:18px;padding:9px 24px;font-size:13px;" onclick="backToSplash()">← Menu</button>
+</div>
+
+<!-- Trophy Screen -->
+<div id="trophy-screen" class="screen hidden" style="gap:0;">
+  <div style="font-size:100px;animation:float 2.2s ease-in-out infinite;margin-bottom:10px;">🏆</div>
+  <h1 style="font-size:54px;font-weight:900;margin-bottom:8px;background:linear-gradient(135deg,#fbbf24,#f59e0b,#d97706);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">CHAMPION!</h1>
+  <div id="trophy-team-name" style="font-size:22px;font-weight:800;margin-bottom:6px;"></div>
+  <div style="font-size:14px;color:rgba(255,255,255,.4);margin-bottom:16px;">Soccer 2026 World Cup Winner</div>
+  <div id="trophy-beaten" style="font-size:12px;color:rgba(255,255,255,.32);text-align:center;line-height:2;max-width:540px;margin-bottom:26px;"></div>
+  <button class="btn" onclick="backToSplash()">Play Again 🎉</button>
+</div>
+
+<!-- Spectate Bar -->
+<div id="spectate-bar" class="hidden" style="position:fixed;top:0;left:0;right:0;z-index:200;display:flex;align-items:center;justify-content:space-between;padding:10px 30px;background:rgba(6,13,26,.92);backdrop-filter:blur(8px);border-bottom:1px solid rgba(251,191,36,.25);">
+  <div style="display:flex;align-items:center;gap:14px;">
+    <span style="font-size:22px;">👁</span>
+    <div>
+      <div style="font-size:11px;font-weight:800;color:#fbbf24;letter-spacing:.1em;">YOU'VE BEEN ELIMINATED · SPECTATING</div>
+      <div id="spectate-match-label" style="font-size:11px;color:rgba(255,255,255,.45);"></div>
+    </div>
+  </div>
+  <button class="btn" style="padding:8px 22px;font-size:13px;" onclick="skipSpectate()">Skip Match →</button>
+</div>
+
 <script>
 // ════════════════════════════════════
 //  TEAMS DATA
@@ -193,10 +236,46 @@ const TEAMS = [
   { name:'Mexico',      flag:'🇲🇽', pri:'#006847', sec:'#FFFFFF', gk:'#FFD700',  pattern:'solid'  },
   { name:'Italy',       flag:'🇮🇹', pri:'#0033A0', sec:'#FFFFFF', gk:'#FFD700',  pattern:'solid'  },
   { name:'Japan',       flag:'🇯🇵', pri:'#002D73', sec:'#FFFFFF', gk:'#CC0000',  pattern:'solid'  },
+  { name:'Morocco',     flag:'🇲🇦', pri:'#C1272D', sec:'#006233', gk:'#FFD700',  pattern:'sash'   },
+  { name:'S. Korea',    flag:'🇰🇷', pri:'#C60C30', sec:'#FFFFFF', gk:'#003478',  pattern:'solid'  },
+  { name:'Croatia',     flag:'🇭🇷', pri:'#CC0000', sec:'#FFFFFF', gk:'#003DA5',  pattern:'hoops'  },
+  { name:'Belgium',     flag:'🇧🇪', pri:'#1E1E1E', sec:'#EF3340', gk:'#FAE042',  pattern:'solid'  },
+  { name:'Uruguay',     flag:'🇺🇾', pri:'#5EB6E4', sec:'#FFFFFF', gk:'#FFD700',  pattern:'stripes'},
+  { name:'Colombia',    flag:'🇨🇴', pri:'#FCD116', sec:'#003087', gk:'#CC0001',  pattern:'solid'  },
+  { name:'Senegal',     flag:'🇸🇳', pri:'#00853F', sec:'#FDEF42', gk:'#E31B23',  pattern:'solid'  },
+  { name:'Australia',   flag:'🇦🇺', pri:'#FFCD00', sec:'#00843D', gk:'#012169',  pattern:'solid'  },
+  { name:'Switzerland', flag:'🇨🇭', pri:'#FF0000', sec:'#FFFFFF', gk:'#1A1A2E',  pattern:'solid'  },
+  { name:'Poland',      flag:'🇵🇱', pri:'#FFFFFF', sec:'#DC143C', gk:'#DC143C',  pattern:'solid'  },
+  { name:'Denmark',     flag:'🇩🇰', pri:'#C60C30', sec:'#FFFFFF', gk:'#006AA7',  pattern:'sash'   },
+  { name:'Cameroon',    flag:'🇨🇲', pri:'#007A5E', sec:'#CE1126', gk:'#FCD116',  pattern:'solid'  },
+  { name:'Canada',      flag:'🇨🇦', pri:'#FF0000', sec:'#FFFFFF', gk:'#CC0000',  pattern:'solid'  },
+  { name:'Ghana',       flag:'🇬🇭', pri:'#006B3F', sec:'#FCD116', gk:'#CE1126',  pattern:'solid'  },
+  { name:'Ecuador',     flag:'🇪🇨', pri:'#FFD100', sec:'#003087', gk:'#CC0001',  pattern:'solid'  },
+  { name:'Turkey',      flag:'🇹🇷', pri:'#E30A17', sec:'#FFFFFF', gk:'#1A1A2E',  pattern:'solid'  },
+  { name:'Ukraine',     flag:'🇺🇦', pri:'#005BBB', sec:'#FFD500', gk:'#1A1A2E',  pattern:'solid'  },
+  { name:'Serbia',      flag:'🇷🇸', pri:'#C6363C', sec:'#0C4076', gk:'#FFD700',  pattern:'sash'   },
+  { name:'Nigeria',     flag:'🇳🇬', pri:'#008751', sec:'#FFFFFF', gk:'#1A1A2E',  pattern:'solid'  },
+  { name:'Saudi Arabia',flag:'🇸🇦', pri:'#006C35', sec:'#FFFFFF', gk:'#006C35',  pattern:'solid'  },
 ];
 
 let selectedTeam = null;
 let cpuTeam      = null;
+
+// ════════════════════════════════════
+//  GAME MODE & TOURNAMENT STATE
+// ════════════════════════════════════
+let gameMode = 'quick';
+const tourn = {
+  round: 0,            // 0=R32 .. 4=Final
+  bracket: [],         // current round's team indices; user at [0]
+  beaten: [],          // teams the user defeated
+  eliminated: false,
+  spectating: false,
+  spectatePairs: [],   // [[teamA,teamB],...] to watch after elimination
+  spectateIdx: 0,
+};
+const ROUND_NAMES = ['Round of 32','Round of 16','Quarter-Finals','Semi-Finals','⭐ The Final'];
+function simMatch(a,b){ return Math.random()<0.5?a:b; }
 
 // ════════════════════════════════════
 //  DIFFICULTIES
@@ -263,6 +342,10 @@ function showDiffSelect() {
   if(selectedTeam===null)return;
   document.getElementById('team-select').classList.add('hidden');
   document.getElementById('diff-select').classList.remove('hidden');
+  // Mode-aware kickoff button
+  const bk=document.getElementById('btn-kickoff');
+  if(gameMode==='tournament'){bk.textContent='🏆 Enter Tournament';bk.onclick=initTournament;}
+  else{bk.textContent='Kick Off! ⚽';bk.onclick=startGame;}
   // Build difficulty grid (once)
   const dg=document.getElementById('diff-grid');
   if(dg.children.length) return;
@@ -290,6 +373,183 @@ function showDiffSelect() {
     dg.appendChild(card);
   });
 }
+
+// ════════════════════════════════════
+//  TOURNAMENT FUNCTIONS
+// ════════════════════════════════════
+function startTournamentFlow(){
+  gameMode='tournament';
+  selectedTeam=null;
+  document.querySelectorAll('.team-card').forEach(c=>c.classList.remove('selected'));
+  const b=document.getElementById('btn-next');
+  b.disabled=true;b.style.opacity='.4';b.style.cursor='not-allowed';
+  showTeamSelect();
+}
+
+function backToSplash(){
+  gameMode='quick';
+  ['trophy-screen','tourn-screen','diff-select','team-select'].forEach(id=>
+    document.getElementById(id).classList.add('hidden'));
+  document.getElementById('spectate-bar').classList.add('hidden');
+  gameState='gameover';
+  if(rafId){cancelAnimationFrame(rafId);rafId=null;}
+  clearInterval(timerTick);
+  score=[0,0];
+  document.getElementById('score-you').textContent='0';
+  document.getElementById('score-cpu').textContent='0';
+  document.getElementById('splash').classList.remove('hidden');
+  document.querySelector('#splash h1').textContent='⚽ Soccer 2026';
+  document.querySelector('#splash p').innerHTML='Choose Quick Match or Tournament Mode!';
+  selectedTeam=null;
+}
+
+function initTournament(){
+  if(selectedTeam===null)return;
+  diff=DIFFICULTIES[selectedDiff];
+  document.getElementById('diff-select').classList.add('hidden');
+  const pool=TEAMS.map((_,i)=>i).filter(i=>i!==selectedTeam);
+  for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+  tourn.bracket=[selectedTeam,...pool.slice(0,31)];
+  tourn.round=0; tourn.beaten=[]; tourn.eliminated=false; tourn.spectating=false;
+  showTournScreen();
+}
+
+function showTournScreen(){
+  const s=document.getElementById('tourn-screen');
+  const u=TEAMS[tourn.bracket[0]],o=TEAMS[tourn.bracket[1]];
+  document.getElementById('tourn-round-badge').textContent=ROUND_NAMES[tourn.round]||'THE FINAL';
+  document.getElementById('tourn-you').innerHTML=
+    '<div style="font-size:50px">'+u.flag+'</div><div style="font-weight:800;font-size:15px">'+u.name+'</div><div style="font-size:11px;color:rgba(255,255,255,.4)">YOU</div>';
+  document.getElementById('tourn-opp').innerHTML=
+    '<div style="font-size:50px">'+o.flag+'</div><div style="font-weight:800;font-size:15px">'+o.name+'</div><div style="font-size:11px;color:#f87171">OPPONENT</div>';
+  const others=[];
+  for(let i=2;i<tourn.bracket.length;i+=2){
+    if(tourn.bracket[i+1]!==undefined){
+      const ta=TEAMS[tourn.bracket[i]],tb=TEAMS[tourn.bracket[i+1]];
+      others.push(ta.flag+' '+ta.name+' vs '+tb.flag+' '+tb.name);
+    }
+  }
+  document.getElementById('tourn-other-matches').innerHTML=
+    others.map(m=>'<div class="other-match-item">'+m+'</div>').join('');
+  s.classList.remove('hidden');
+}
+
+function playTournamentMatch(){
+  document.getElementById('tourn-screen').classList.add('hidden');
+  tourn.spectating=false;
+  cpuTeam=tourn.bracket[1];
+  _launchMatch(selectedTeam,cpuTeam,120,true);
+}
+
+function _launchMatch(uIdx,cIdx,dur,giveControl){
+  const uT=TEAMS[uIdx],cT=TEAMS[cIdx];
+  diff=DIFFICULTIES[selectedDiff];
+  brain.reset(); score=[0,0]; timeLeft=dur; gameState='playing';
+  players=[]; userTeam=[]; userPlayer=null;
+  document.getElementById('timer').classList.remove('urgent');
+  document.getElementById('lbl-you').textContent=uT.flag+' '+uT.name;
+  document.getElementById('lbl-cpu').textContent=cT.flag+' '+cT.name;
+  const cx=W/2,cy=H/2;
+  const att=new Player(cx-55,cy,0,'field',uT,9); att.playerNum=1;
+  const mid=new Player(PX+PW*0.33,cy,0,'field',uT,8); mid.playerNum=2;
+  const def=new Player(PX+PW*0.17,cy,0,'field',uT,5); def.playerNum=3;
+  const gk0=new Player(PX+22,cy,0,'goalkeeper',uT,1); gk0.playerNum=4;
+  players.push(att,mid,def,gk0);
+  if(giveControl){att.isUser=true; userTeam=[att,mid,def,gk0]; userPlayer=att;}
+  const catt=new Player(cx+55,cy,1,'field',cT,11);
+  const cmid=new Player(PX+PW*0.67,cy,1,'field',cT,8);
+  const cdef=new Player(PX+PW*0.83,cy,1,'field',cT,4);
+  const cgk=new Player(PX+PW-22,cy,1,'goalkeeper',cT,1);
+  players.push(catt,cmid,cdef,cgk);
+  for(const p of players){p.homeX=p.x;p.homeY=p.y;}
+  resetKickoff(); updateHUD();
+  clearInterval(timerTick); timerTick=setInterval(tick,1000);
+  if(rafId)cancelAnimationFrame(rafId);
+  lastTs=performance.now(); rafId=requestAnimationFrame(loop);
+}
+
+function tournamentEndMatch(){
+  const userWon=score[0]>score[1]||(score[0]===score[1]&&Math.random()<0.5);
+  if(userWon){
+    tourn.beaten.push(tourn.bracket[1]);
+    const next=[selectedTeam];
+    for(let i=2;i<tourn.bracket.length;i+=2){
+      if(tourn.bracket[i+1]!==undefined) next.push(simMatch(tourn.bracket[i],tourn.bracket[i+1]));
+      else if(tourn.bracket[i]!==undefined) next.push(tourn.bracket[i]);
+    }
+    tourn.bracket=next; tourn.round++;
+    if(tourn.round>=5||tourn.bracket.length<=1){showTrophy();}
+    else{showTournScreen();}
+  } else {
+    tourn.eliminated=true; tourn.spectating=true;
+    tourn.spectatePairs=[];
+    for(let i=2;i<tourn.bracket.length;i+=2){
+      if(tourn.bracket[i+1]!==undefined) tourn.spectatePairs.push([tourn.bracket[i],tourn.bracket[i+1]]);
+    }
+    tourn.spectateIdx=0;
+    _advanceSpectate();
+  }
+}
+
+function _advanceSpectate(){
+  if(tourn.spectateIdx>=tourn.spectatePairs.length){
+    document.getElementById('spectate-bar').classList.add('hidden');
+    setTimeout(backToSplash,400);
+    return;
+  }
+  const[tA,tB]=tourn.spectatePairs[tourn.spectateIdx];
+  const ta=TEAMS[tA],tb=TEAMS[tB];
+  document.getElementById('spectate-match-label').textContent=
+    ta.flag+' '+ta.name+' vs '+tb.flag+' '+tb.name+
+    ' · Match '+(tourn.spectateIdx+1)+'/'+tourn.spectatePairs.length;
+  document.getElementById('spectate-bar').classList.remove('hidden');
+  _launchMatch(tA,tB,90,false);
+}
+
+function skipSpectate(){
+  clearInterval(timerTick);
+  if(rafId){cancelAnimationFrame(rafId);rafId=null;}
+  gameState='gameover';
+  tourn.spectateIdx++;
+  _advanceSpectate();
+}
+
+function showTrophy(){
+  document.getElementById('trophy-screen').classList.remove('hidden');
+  const t=TEAMS[selectedTeam];
+  document.getElementById('trophy-team-name').textContent=t.flag+' '+t.name;
+  document.getElementById('trophy-beaten').innerHTML=
+    'Defeated: '+tourn.beaten.map(i=>TEAMS[i].flag+' '+TEAMS[i].name).join(' → ');
+  _launchConfetti();
+}
+
+function _launchConfetti(){
+  const c2=document.createElement('canvas');
+  c2.width=window.innerWidth; c2.height=window.innerHeight;
+  c2.style.cssText='position:fixed;inset:0;pointer-events:none;z-index:900;';
+  document.body.appendChild(c2);
+  const cx2=c2.getContext('2d');
+  const cols=['#fbbf24','#38bdf8','#f87171','#4ade80','#a78bfa','#fb923c'];
+  const pts=Array.from({length:140},()=>({
+    x:Math.random()*c2.width,y:-20,
+    vy:2+Math.random()*5,vx:(Math.random()-.5)*4,
+    r:5+Math.random()*6,spin:Math.random()*Math.PI*2,
+    col:cols[Math.floor(Math.random()*cols.length)],
+  }));
+  let cf;
+  (function draw(){
+    cx2.clearRect(0,0,c2.width,c2.height);
+    pts.forEach(p=>{
+      p.y+=p.vy;p.x+=p.vx;p.spin+=.06;
+      cx2.save();cx2.translate(p.x,p.y);cx2.rotate(p.spin);
+      cx2.fillStyle=p.col;cx2.fillRect(-p.r/2,-p.r/2,p.r,p.r);
+      cx2.restore();
+    });
+    cf=requestAnimationFrame(draw);
+  })();
+  setTimeout(()=>{cancelAnimationFrame(cf);c2.remove();},6000);
+}
+
 
 // ════════════════════════════════════
 //  CANVAS & CONSTANTS
@@ -1055,13 +1315,18 @@ function updateHUD(){
 }
 function endGame(){
   gameState='gameover';clearInterval(timerTick);
-  // Reset to splash (so they can pick team again)
   document.getElementById('score-you').textContent='0';
   document.getElementById('score-cpu').textContent='0';
-  // Show result on canvas then open splash
+  if(gameMode==='tournament'){
+    setTimeout(()=>{
+      if(tourn.spectating){ tourn.spectateIdx++; _advanceSpectate(); }
+      else { tournamentEndMatch(); }
+    },2200);
+    return;
+  }
+  // Quick match: show splash
   setTimeout(()=>{
     document.getElementById('splash').classList.remove('hidden');
-    // Update splash text
     const em=score[0]>score[1]?'🏆':score[1]>score[0]?'😤':'🤝';
     const txt=score[0]>score[1]?'You Win!':score[1]>score[0]?'You Lose!':"Draw!";
     document.querySelector('#splash h1').textContent=`${em} ${txt}`;
