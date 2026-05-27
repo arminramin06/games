@@ -151,6 +151,7 @@ kbd{
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">A</kbd> GK Boot</div>
   <div class="ctrl" style="color:#fbbf24"><kbd style="border-color:#fbbf24aa;color:#fbbf24">D</kbd> GK Block</div>
   <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">R</kbd> Steal</div>
+  <div class="ctrl" style="color:#94a3b8"><kbd style="border-color:#94a3b8aa;color:#94a3b8">P</kbd> Pause</div>
 </div>
 
 <!-- Splash -->
@@ -437,6 +438,7 @@ function playTournamentMatch(){
 }
 
 function _launchMatch(uIdx,cIdx,dur,giveControl){
+  paused=false;
   const uT=TEAMS[uIdx],cT=TEAMS[cIdx];
   diff=DIFFICULTIES[selectedDiff];
   brain.reset(); score=[0,0]; timeLeft=dur; gameState='playing';
@@ -588,6 +590,7 @@ document.addEventListener('keydown',e=>{
     if((e.key==='d'||e.key==='D')&&userPlayer?.role==='goalkeeper') doBlock();
     if(e.key==='q'||e.key==='Q') doJuke();
     if(e.key==='r'||e.key==='R') doSteal();
+    if(e.key==='p'||e.key==='P') togglePause();
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
@@ -595,6 +598,7 @@ document.addEventListener('keyup',e=>{keys[e.key]=false;});
 window.addEventListener('blur',()=>{
   Object.keys(keys).forEach(k=>delete keys[k]);
   sHeld=wHeld=aHeld=false; chargeS=chargeW=chargeA=0;
+  // Don't auto-unpause on blur — user pressed P deliberately
 });
 
 // ════════════════════════════════════
@@ -665,6 +669,7 @@ let chargeS=0,chargeW=0,chargeA=0;
 let sHeld=false,wHeld=false,aHeld=false;
 let lastBallTeam=-1; // tracks which team last owned the ball (for triangle-during-pass)
 let playerPerf=0.5;  // 0=struggling, 1=dominating — scales teammate quality
+let paused=false;     // true when game is paused (P key)
 
 // ════════════════════════════════════
 //  BALL
@@ -998,6 +1003,38 @@ function doSteal(){
     userPlayer.stealT=-0.25; // small fail flash
     userPlayer.cooldown=0.2;
   }
+}
+
+
+// ════════════════════════════════════
+//  PAUSE  (P key)
+// ════════════════════════════════════
+function togglePause(){
+  if(gameState!=='playing') return;
+  paused=!paused;
+  if(paused){
+    clearInterval(timerTick); // freeze the countdown
+  } else {
+    lastTs=performance.now(); // reset so dt doesn't jump on resume
+    timerTick=setInterval(tick,1000); // restart countdown
+  }
+}
+
+function drawPauseOverlay(){
+  ctx.save();
+  ctx.fillStyle='rgba(6,13,26,0.72)';
+  ctx.fillRect(0,0,W,H);
+  // Big PAUSED text
+  ctx.textAlign='center';
+  ctx.shadowColor='rgba(0,0,0,.6)';ctx.shadowBlur=18;
+  ctx.font='bold 58px system-ui';
+  ctx.fillStyle='#ffffff';
+  ctx.fillText('⏸ PAUSED',W/2,H/2-18);
+  ctx.shadowBlur=0;
+  ctx.font='17px system-ui';
+  ctx.fillStyle='rgba(255,255,255,.45)';
+  ctx.fillText('Press P to resume',W/2,H/2+22);
+  ctx.restore();
 }
 
 // ════════════════════════════════════
@@ -1550,6 +1587,16 @@ function drawOverlay(){
 // ════════════════════════════════════
 function loop(ts){
   const dt=Math.min((ts-lastTs)/1000,.05);lastTs=ts;
+  // ── PAUSED: freeze all updates, show overlay, keep RAF alive ──
+  if(paused){
+    rafId=requestAnimationFrame(loop);
+    drawPitch(); // redraw pitch so canvas isn't blank
+    for(const p of players) p.draw(); // keep players visible
+    drawBall();
+    drawHUD();
+    drawPauseOverlay();
+    return;
+  }
   ctx.clearRect(0,0,W,H);
   drawPitch();
   if(gameState==='playing'||gameState==='goal'){
@@ -1581,6 +1628,7 @@ function loop(ts){
 // ════════════════════════════════════
 function startGame(){
   if(selectedTeam===null)return;
+  paused=false;
   diff=DIFFICULTIES[selectedDiff];  // apply chosen difficulty
   document.getElementById('diff-select').classList.add('hidden');
   document.getElementById('team-select').classList.add('hidden');
