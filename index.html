@@ -560,9 +560,10 @@ const GH=115, GD=18;
 const GT=PY+(PH-GH)/2, GB=GT+GH;
 
 // ── Slower speeds ──────────────────
-const FRICTION  = 0.963;
-const MAX_BALL  = 11;
-const SHOOT_PWR = 11;
+const FRICTION  = 0.973;  // less friction — powerful shots travel ~600px
+const MAX_BALL  = 22;  // raised to allow powerful user shots to travel far
+const SHOOT_PWR     = 11;  // CPU/AI shooting power
+const USER_SHOOT_PWR = 22;  // User charged shot — high enough for half-court goals
 const PASS_PWR  = 8;
 const BOOT_PWR  = 13;
 const SLIDE_SPD = 6;
@@ -751,6 +752,7 @@ class Player {
     this.celebrating=false; // knee-slide emote active
     this.celebMsg='';      // speech bubble text
     this.celebX=0;         // slide offset
+    this.celebTimer=0;     // auto-stop timer
     this.homeX=x;this.homeY=y;
   }
   get spd(){
@@ -764,6 +766,11 @@ class Player {
     if(this.slideCd>0)  this.slideCd-=dt;
     if(this.stealCd>0)  this.stealCd-=dt;
     if(this.stealT!==0) this.stealT=this.stealT>0?Math.max(0,this.stealT-dt):Math.min(0,this.stealT+dt);
+    if(this.celebrating){
+      this.celebTimer-=dt;
+      this.celebX=Math.min((this.celebX||0)+1.8,60); // slide forward
+      if(this.celebTimer<=0){this.celebrating=false;this.celebX=0;}
+    }
     if(this.blockT>0){  this.blockT-=dt;if(this.blockT<=0)this.blocking=false;}
 
     if(this.jukeCd>0) this.jukeCd-=dt;
@@ -802,7 +809,7 @@ class Player {
       }
     }
 
-    if(this.isUser&&!this.blocking){
+    if(this.isUser&&!this.blocking&&!this.celebrating){
       let mx=0,my=0;
       if(keys['ArrowLeft'])mx-=1;if(keys['ArrowRight'])mx+=1;
       if(keys['ArrowUp'])my-=1;if(keys['ArrowDown'])my+=1;
@@ -1051,8 +1058,9 @@ const TAUNT_MSGS = [
   "sit down 😂","too easy 😎","get rekt 🎉","GOAT 🐐",
 ];
 function doEmote(){
-  if(!userPlayer||gameState!=='goal'||goalTeam!==0) return; // only after YOU score
+  if(!userPlayer||(gameState!=='playing'&&gameState!=='goal')) return;
   userPlayer.celebrating=true;
+  userPlayer.celebTimer=1.8; // 1.8 second emote
   userPlayer.celebMsg=TAUNT_MSGS[Math.floor(Math.random()*TAUNT_MSGS.length)];
   userPlayer.celebX=0;
 }
@@ -1136,7 +1144,7 @@ function doShoot(power=1){
   const gx=userPlayer.team===0?PX+PW+GD:PX-GD;
   const gy=H/2+(Math.random()-.5)*38;
   const dx=gx-userPlayer.x,dy=gy-userPlayer.y,d=Math.hypot(dx,dy)||1;
-  const pwr=SHOOT_PWR*(0.38+0.62*power); // 38% tap → 100% full charge
+  const pwr=USER_SHOOT_PWR*(0.35+0.65*power); // 35% tap → 100% full charge (half-court capable)
   ball.owner=null;ball.vx=(dx/d)*pwr;ball.vy=(dy/d)*pwr;
   ball.spin=(userPlayer.y-gy)*0.18;
   userPlayer.cooldown=0.85; // shoot cooldown — prevents spam
@@ -1480,11 +1488,12 @@ function updateBall(){
 // ════════════════════════════════════
 function onGoal(team){
   if(gameState!=='playing')return;
-  score[team]++;goalTeam=team;goalAnim=2.8;gameState='goal';ball.owner=null;
+  score[team]++;goalTeam=team;goalAnim=0;gameState='goal';ball.owner=null;
   updateHUD();
   const el=document.getElementById(team===0?'score-you':'score-cpu');
   el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),400);
-  setTimeout(()=>{resetKickoff();gameState='playing';},2400);
+  // No goal overlay — just a brief pause then kick off
+  setTimeout(()=>{resetKickoff();gameState='playing';},850);
 }
 function resetKickoff(){
   if(userPlayer) userPlayer.celebrating=false;
@@ -1697,11 +1706,8 @@ function loop(ts){
     }
     for(const p of players){if(!p.isUser)p.draw();}
     if(userPlayer)userPlayer.draw();
-    // Knee-slide celebration (C key after scoring)
-    if(gameState==='goal'&&userPlayer?.celebrating){
-      userPlayer.celebX=Math.min((userPlayer.celebX||0)+1.8,55);
-      drawCelebrationPlayer(userPlayer);
-    }
+    // Knee-slide celebration (C key — any time)
+    if(userPlayer?.celebrating) drawCelebrationPlayer(userPlayer);
     drawBall();
     drawChargeArcs();
     drawGoalFlash(dt);
