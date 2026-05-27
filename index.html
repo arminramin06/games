@@ -1184,55 +1184,57 @@ function updateAI(p){
 
   // ── GOALKEEPER (both teams) ───────────────────────
   if(p.role==='goalkeeper'){
+    const IMP=DIFFICULTIES[3]; // friendly GK always on Impossible
+    const gkSpd=p.team===0?IMP.gkSpd:spd; // team 0 GK = Impossible speed
     const lineX=p.team===0?PX+20:PX+PW-20;
     const shotBias=p.team===1?brain.avgShotY*brain.shotConf*0.75:0;
     const tY=Math.max(GT+p.r,Math.min(GB-p.r,ball.y+shotBias));
-    moveTo(p,lineX,tY,spd);
+    moveTo(p,lineX,tY,gkSpd);
     const closeX=p.team===0?PX+130:PX+PW-130;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
-    if(danger)moveTo(p,ball.x,ball.y,spd);
-    if(ball.owner===p&&Math.random()<0.04)aiGKBoot(p);
+    if(danger)moveTo(p,ball.x,ball.y,gkSpd);
+    if(ball.owner===p&&Math.random()<0.06)aiGKBoot(p); // more aggressive boot
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      const blockChance=diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance;
-      if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<blockChance){
+      // Team 0 GK: always uses Impossible blockChance
+      const bChance=p.team===0?IMP.blockChance:diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance;
+      if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<bChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
       }
     }
     clamp(p);return;
   }
 
-  // ── USER TEAM AI (non-GK, non-user-controlled) ────
+  // ── USER TEAM AI — always Impossible quality regardless of selected difficulty ──
   if(p.team===0){
+    const IMP=DIFFICULTIES[3]; // Impossible: aiSpd 2.8, shootChance 0.06, pressMax 0.70
+    const fSpd=IMP.aiSpd;      // field speed always at Impossible level
     if(ball.owner===p){
-      // Teammate quality mirrors player skill (playerPerf 0→1 scales 50%→150%)
-      const teamQuality=0.5+playerPerf*1.0; // poor player→mediocre mates, great player→elite mates
       const mate=findOpenMate(p);
       const oppNear=players.some(o=>o.team!==0&&dist(o,p)<100);
-      const sc=diff.shootChance*teamQuality;
+      const sc=IMP.shootChance; // Impossible shoot chance
       if(Math.abs(p.x-atkX)<210&&Math.random()<sc) aiShoot(p,atkX);
       else if(mate&&(oppNear||Math.random()<sc*0.85)) aiPassTo(p,mate);
-      else moveTo(p,atkX-55,H/2,spd);
+      else moveTo(p,atkX-55,H/2,fSpd);
     } else if(ball.owner?.team===0
            || (!ball.owner && lastBallTeam===0 && Math.hypot(ball.vx,ball.vy)>1.2)){
-      // Our team has ball or ball is from our pass → hold triangle
+      // Our team has ball or ball is from our pass → sprint into triangle positions
       const sp=getSpreadPos(p);
-      moveTo(p,sp.x,sp.y,spd*0.93);
+      moveTo(p,sp.x,sp.y,fSpd*0.95);
     } else if(!ball.owner){
-      // LOOSE BALL: closest user field player sprints to win it
+      // LOOSE BALL: closest user field player sprints to win it at full Impossible speed
       const myD=dist(p,ball);
       const isClosest=!players.some(q=>q.team===0&&q.role!=='goalkeeper'&&!q.isUser&&q!==p&&dist(q,ball)<myD);
       if(isClosest&&myD<300){
-        moveTo(p,ball.x,ball.y,spd*1.2); // sprint!
+        moveTo(p,ball.x,ball.y,fSpd*1.25); // full sprint
       } else {
         const sp=getSpreadPos(p);
-        moveTo(p,sp.x,sp.y,spd*0.88);
+        moveTo(p,sp.x,sp.y,fSpd*0.9);
       }
     } else {
-      // Press harder when player is dominating (mates match their energy)
-      const pq=0.5+playerPerf*1.0;
-      const pressMult=(1+(1-brain.passRate)*brain.posConf*(diff.pressMax||0.5)*0.85)*pq;
-      moveTo(p,ball.owner.x,ball.owner.y,spd*pressMult);
+      // CPU has ball → press hard at Impossible intensity
+      const pressMult=1+(1-brain.passRate)*brain.posConf*IMP.pressMax*0.9;
+      moveTo(p,ball.owner.x,ball.owner.y,fSpd*pressMult);
     }
     clamp(p);return;
   }
