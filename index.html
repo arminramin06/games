@@ -580,7 +580,7 @@ function project(gx,gy,gz=0){
   const groundY=P3_FAR_Y+t*(P3_NEAR_Y-P3_FAR_Y);
   const hScale=P3_FAR_SCL+(1-P3_FAR_SCL)*t;
   const sx=W/2+(gx-W/2)*hScale;
-  const sizeScale=0.50+0.68*t;
+  const sizeScale=0.88+0.12*t; // near-uniform size — no shrinking when going left
   return{x:sx,y:groundY-gz*hScale*1.05,scale:sizeScale,t,groundY};
 }
 
@@ -1528,8 +1528,7 @@ function onGoal(team){
   updateHUD();
   const el=document.getElementById(team===0?'score-you':'score-cpu');
   el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),400);
-  // 10-second celebration window before kickoff reset
-  setTimeout(()=>{resetKickoff();gameState='playing';},10000);
+  setTimeout(()=>{resetKickoff();gameState='playing';},850);
 }
 function resetKickoff(){
   if(userPlayer) userPlayer.celebrating=false;
@@ -1848,7 +1847,7 @@ function draw3DPlayer(p){
   const pr=project(px3,p.y,0);
   const r=p.r*pr.scale;
   // Ground shadow
-  ctx.save();ctx.globalAlpha=0.38*pr.scale;
+  ctx.save();ctx.globalAlpha=0.38;
   ctx.fillStyle='rgba(0,0,0,.75)';
   ctx.beginPath();ctx.ellipse(pr.x+r*.12,pr.groundY,r*.82,r*.26,0,0,Math.PI*2);ctx.fill();
   ctx.restore();
