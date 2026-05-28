@@ -153,6 +153,7 @@ kbd{
   <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">R</kbd> Steal</div>
   <div class="ctrl" style="color:#94a3b8"><kbd style="border-color:#94a3b8aa;color:#94a3b8">P</kbd> Pause</div>
   <div class="ctrl" style="color:#f472b6"><kbd style="border-color:#f472b6aa;color:#f472b6">C</kbd> Emote (after goal)</div>
+  <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">F</kbd> Camera view</div>
 </div>
 
 <!-- Splash -->
@@ -556,32 +557,66 @@ const canvas = document.getElementById('canvas');
 const ctx    = canvas.getContext('2d');
 const W=1100,H=660;
 // ════════════════════════════════════
-//  3-D PROJECTION ENGINE
+//  CAMERA SYSTEM  (F = cycle modes)
 // ════════════════════════════════════
-// Camera: elevated above the near touchline, looking toward far touchline.
-// Far side (gy=PY)  → screen y ≈ 155, compressed width (52%)
-// Near side(gy=PH)  → screen y ≈ 570, full width (100%)
-const P3_FAR_Y   = 155;          // screen Y of far touchline
-const P3_NEAR_Y  = 570;          // screen Y of near touchline
-const P3_FAR_SCL = 0.52;         // horizontal scale at far end
-const BALL_GRAVITY = 0.18;       // gz gravity per frame
+const BALL_GRAVITY = 0.18;
+const CAM_NAMES = ['🎥 Isometric','🛸 Top-Down','📺 Broadcast','🎮 Behind Player'];
+let camMode = 0;       // 0=iso  1=top  2=broadcast  3=chase
+let camModeFlash = 0;  // seconds to show mode label
 
-// Pre-bake crowd so it doesn't flicker each frame
+// Pre-bake crowd (stable positions)
 const _crowd3 = Object.freeze(Array.from({length:500},()=>({
   x:30+Math.random()*(W-60),
-  y:8+Math.random()*(P3_FAR_Y-24),
+  y:8+Math.random()*131,
   col:['#3b82f6','#ef4444','#f59e0b','#10b981','#fff','#a855f7','#fb923c','#ec4899']
        [Math.floor(Math.random()*8)],
   r:1.2+Math.random()*2,
 })));
 
-function project(gx,gy,gz=0){
+// ── Mode 0: Isometric ──────────────────────────────
+function _projIso(gx,gy,gz=0){
   const t=Math.max(0,Math.min(1.08,(gy-PY)/PH));
-  const groundY=P3_FAR_Y+t*(P3_NEAR_Y-P3_FAR_Y);
-  const hScale=P3_FAR_SCL+(1-P3_FAR_SCL)*t;
+  const groundY=155+t*(570-155);
+  const hScale=0.52+(1-0.52)*t;
   const sx=W/2+(gx-W/2)*hScale;
-  const sizeScale=0.88+0.12*t; // near-uniform size — no shrinking when going left
-  return{x:sx,y:groundY-gz*hScale*1.05,scale:sizeScale,t,groundY};
+  return{x:sx,y:groundY-gz*hScale*1.05,scale:0.88+0.12*t,t,groundY};
+}
+// ── Mode 1: Top-Down ───────────────────────────────
+function _projTop(gx,gy,gz=0){
+  const sx=PX+(gx-PX)/(PW)*(W-PX*2);
+  const sy=PY+(gy-PY)/(PH)*(H-PY*2);
+  return{x:sx,y:sy-gz*0.4,scale:0.93,t:(gy-PY)/PH,groundY:sy};
+}
+// ── Mode 2: Broadcast (low, dramatic angle) ────────
+function _projTV(gx,gy,gz=0){
+  const t=Math.max(0,Math.min(1.1,(gy-PY)/PH));
+  const groundY=225+t*(H-80-225);
+  const hScale=0.24+0.76*t;
+  const sx=W/2+(gx-W/2)*hScale;
+  return{x:sx,y:groundY-gz*hScale*2.2,scale:0.60+0.55*t,t,groundY};
+}
+// ── Mode 3: Chase-Cam (behind player) ──────────────
+function _projChase(gx,gy,gz=0){
+  if(!userPlayer) return _projIso(gx,gy,gz);
+  const dir=userPlayer.team===0?1:-1;
+  const BACK=200,CAM_H=65,FOCAL=520;
+  const camX=Math.max(PX+5,Math.min(PX+PW-5,userPlayer.x-dir*BACK));
+  const camY=userPlayer.y;
+  const fwd=(gx-camX)*dir;
+  const lat=gy-camY;
+  if(fwd<2) return null;
+  const sc=FOCAL/fwd;
+  const groundY=H*0.50+CAM_H*sc;
+  return{x:W/2+lat*sc,y:groundY-gz*sc,scale:Math.max(0.03,Math.min(8,sc/48)),t:(gy-PY)/PH,groundY};
+}
+
+function project(gx,gy,gz=0){
+  switch(camMode){
+    case 1: return _projTop(gx,gy,gz);
+    case 2: return _projTV(gx,gy,gz);
+    case 3: return _projChase(gx,gy,gz);
+    default: return _projIso(gx,gy,gz);
+  }
 }
 
 const PX=30,PY=20,PW=W-PX*2,PH=H-PY*2;
@@ -623,6 +658,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='r'||e.key==='R') doSteal();
     if(e.key==='p'||e.key==='P') togglePause();
     if(e.key==='c'||e.key==='C') doEmote();
+    if(e.key==='f'||e.key==='F'){camMode=(camMode+1)%4;camModeFlash=1.8;}
   }
 });
 document.addEventListener('keyup',e=>{keys[e.key]=false;});
@@ -1575,9 +1611,40 @@ function endGame(){
 //  DRAWING
 // ════════════════════════════════════
 function drawPitch(){
-  // ── SKY ──
   ctx.clearRect(0,0,W,H);
-  const sky=ctx.createLinearGradient(0,0,0,P3_FAR_Y+55);
+  // ── TOP-DOWN mode: simple flat field ──
+  if(camMode===1){
+    ctx.fillStyle='#14532d';ctx.fillRect(0,0,W,H);
+    for(let i=0;i<10;i++){if(i%2===0){ctx.fillStyle='rgba(0,0,0,.06)';const x=PX+PW/10*i;ctx.fillRect(x,PY,PW/10,PH);}}
+    ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=2;
+    [[PX,PY,PX+PW,PY],[PX,PY+PH,PX+PW,PY+PH],[PX,PY,PX,PY+PH],[PX+PW,PY,PX+PW,PY+PH],[W/2,PY,W/2,PY+PH]].forEach(([x1,y1,x2,y2])=>{ctx.beginPath();ctx.moveTo(_projTop(x1,y1).x,_projTop(x1,y1).y);ctx.lineTo(_projTop(x2,y2).x,_projTop(x2,y2).y);ctx.stroke();});
+    ctx.beginPath();for(let i=0;i<=40;i++){const a=(i/40)*Math.PI*2,pp=_projTop(W/2+Math.cos(a)*70,H/2+Math.sin(a)*70);i===0?ctx.moveTo(pp.x,pp.y):ctx.lineTo(pp.x,pp.y);}ctx.stroke();
+    // Top-down goals (rectangles)
+    ctx.lineWidth=3;ctx.strokeStyle='#fff';
+    [{gx:PX,ox:-GD},{gx:PX+PW,ox:0}].forEach(({gx,ox})=>{const p=_projTop(gx+ox,GT),p2=_projTop(gx+ox+GD,GB);ctx.strokeRect(Math.min(p.x,p2.x),p.y,Math.abs(p2.x-p.x),p2.y-p.y);});
+    return;
+  }
+  // ── CHASE-CAM mode: FPS-style horizon ──
+  if(camMode===3){
+    const hor=H*0.50;
+    const sky3=ctx.createLinearGradient(0,0,0,hor);sky3.addColorStop(0,'#020816');sky3.addColorStop(1,'#1a3060');
+    ctx.fillStyle=sky3;ctx.fillRect(0,0,W,hor);
+    const gnd3=ctx.createLinearGradient(0,hor,0,H);gnd3.addColorStop(0,'#0a1f0e');gnd3.addColorStop(1,'#166534');
+    ctx.fillStyle=gnd3;ctx.fillRect(0,hor,W,H-hor);
+    [[100,40],[W-100,40],[50,140],[W-50,140]].forEach(([lx,ly])=>{ctx.save();ctx.shadowColor='#fffde7';ctx.shadowBlur=30;ctx.fillStyle='#fff9c4';ctx.beginPath();ctx.arc(lx,ly,4,0,Math.PI*2);ctx.fill();ctx.restore();});
+    _crowd3.forEach(({x,y,col,r})=>{ctx.fillStyle=col+'99';ctx.beginPath();ctx.arc(x,y*(hor/155),r,0,Math.PI*2);ctx.fill();});
+    // Field lines in chase perspective
+    ctx.strokeStyle='rgba(255,255,255,.72)';ctx.lineWidth=2;
+    function L3c(x1,y1,x2,y2){const a=_projChase(x1,y1,0),b=_projChase(x2,y2,0);if(!a||!b)return;ctx.beginPath();ctx.moveTo(a.x,Math.max(hor,a.y));ctx.lineTo(b.x,Math.max(hor,b.y));ctx.stroke();}
+    [[PX,PY,PX+PW,PY],[PX,PY+PH,PX+PW,PY+PH],[PX,PY,PX,PY+PH],[PX+PW,PY,PX+PW,PY+PH],[W/2,PY,W/2,PY+PH],[PX,H/2-100,PX+110,H/2-100],[PX+110,H/2-100,PX+110,H/2+100],[PX,H/2+100,PX+110,H/2+100],[PX+PW,H/2-100,PX+PW-110,H/2-100],[PX+PW-110,H/2-100,PX+PW-110,H/2+100],[PX+PW,H/2+100,PX+PW-110,H/2+100]].forEach(l=>L3c(...l));
+    // Chase goals
+    const PH3=55;function goalC(gx,dir){ctx.lineWidth=4;ctx.strokeStyle='#f1f5f9';[GT,GB].forEach(py=>{const b=_projChase(gx,py,0),t=_projChase(gx,py,PH3);if(b&&t){ctx.beginPath();ctx.moveTo(b.x,Math.max(hor,b.y));ctx.lineTo(t.x,Math.max(hor,t.y));ctx.stroke();}});const ct=_projChase(gx,GT,PH3),cb=_projChase(gx,GB,PH3);if(ct&&cb){ctx.beginPath();ctx.moveTo(ct.x,ct.y);ctx.lineTo(cb.x,cb.y);ctx.stroke();}}
+    goalC(PX,1);goalC(PX+PW,-1);
+    return;
+  }
+  // ── ISOMETRIC / BROADCAST (modes 0 & 2) ──
+  const skyTop=camMode===2?225:155;
+  const sky=ctx.createLinearGradient(0,0,0,skyTop+55);
   sky.addColorStop(0,'#060d1f');sky.addColorStop(0.55,'#0f2044');sky.addColorStop(1,'#1a3060');
   ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
 
@@ -1825,6 +1892,16 @@ function drawOverlay(){
     ctx.fillStyle='#fbbf24';ctx.font='bold 10px system-ui';ctx.textAlign='center';
     ctx.fillText(`SLIDE ${userPlayer.slideCd.toFixed(1)}s`,userPlayer.x,userPlayer.y-userPlayer.r-15);
   }
+  // Camera mode flash label
+  if(camModeFlash>0){
+    const alpha=Math.min(1,camModeFlash);
+    ctx.save();ctx.globalAlpha=alpha;
+    ctx.font='bold 18px system-ui';ctx.textAlign='center';
+    ctx.fillStyle='rgba(0,0,0,.55)';const lw=ctx.measureText(CAM_NAMES[camMode]).width+28;
+    rRect(ctx,W/2-lw/2,22,lw,32,8);ctx.fill();
+    ctx.fillStyle='#ffffff';ctx.fillText(CAM_NAMES[camMode],W/2,44);
+    ctx.restore();
+  }
   // AI learning badge (top-right)
   if(brain.level>0){
     const lvlLabels=['','🧠 AI Learning...','🧠 AI Adapting!','🧠 AI Calibrated'];
@@ -1938,6 +2015,7 @@ function loop(ts){
       const _tgt=(score[0]+1)/(score[0]+score[1]+2);
       playerPerf=playerPerf*0.994+_tgt*0.006;
       if(brain.adaptFlash>0)brain.adaptFlash-=dt;
+      if(camModeFlash>0)camModeFlash-=dt;
       for(const p of players){updateAI(p);p.update(dt);}
       updateBall();
     }
