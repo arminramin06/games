@@ -753,83 +753,23 @@ let deadBallMsg='';    // label shown during dead ball
 let deadBallBallX=W/2, deadBallBallY=H/2; // where ball snaps when resuming
 let deadBallGiveTo=-1; // team 0 or 1 gets possession on resume
 
-const referee={
-  x:W/2+60, y:H/2+90, r:9,
-  cardFlash:0, cardColor:'yellow',
-  whistleT:0,
-  foulCooldown:0, // prevent rapid foul calls
-  update(dt){
-    // Follow ball (offset to the side, slightly behind)
-    const offX=ball.y>H/2?-60:60;
-    const tx=ball.x+offX, ty=ball.y+(ball.y<H/2?70:-70);
-    const dx=tx-this.x, dy=ty-this.y, d=Math.hypot(dx,dy)||1;
-    if(d>25){this.x+=dx/d*2.2*Math.min(1,d/60);this.y+=dy/d*2.2*Math.min(1,d/60);}
-    // Stay inside field
-    this.x=Math.max(PX+14,Math.min(PX+PW-14,this.x));
-    this.y=Math.max(PY+14,Math.min(PY+PH-14,this.y));
-    if(this.cardFlash>0)this.cardFlash-=dt;
-    if(this.whistleT>0)this.whistleT-=dt;
-    if(this.foulCooldown>0)this.foulCooldown-=dt;
-  },
-  draw(){
-    const pr=project(this.x,this.y,0);
-    if(!pr)return;
-    const r=this.r*pr.scale;
-    // Shadow
-    ctx.save();ctx.globalAlpha=0.35;ctx.fillStyle='rgba(0,0,0,.7)';
-    ctx.beginPath();ctx.ellipse(pr.x,pr.groundY,r*.85,r*.28,0,0,Math.PI*2);ctx.fill();ctx.restore();
-    // Body
-    ctx.save();ctx.beginPath();ctx.arc(pr.x,pr.y,r,0,Math.PI*2);
-    ctx.fillStyle='#111111';ctx.fill();
-    ctx.strokeStyle='#fbbf24';ctx.lineWidth=Math.max(1,r*.15);ctx.stroke();
-    ctx.font=Math.max(7,r*.75)+'px system-ui';ctx.textAlign='center';
-    ctx.fillStyle='#fbbf24';ctx.fillText('REF',pr.x,pr.y+r*.35);
-    ctx.restore();
-    // Whistle animation
-    if(this.whistleT>0){
-      ctx.save();ctx.globalAlpha=Math.min(1,this.whistleT*.8);
-      ctx.font='16px system-ui';ctx.textAlign='center';
-      ctx.fillText('📣',pr.x,pr.y-r-12);ctx.restore();
-    }
-    // Card
-    if(this.cardFlash>0){
-      ctx.save();ctx.globalAlpha=Math.min(1,this.cardFlash);
-      ctx.fillStyle=this.cardColor==='red'?'#ef4444':'#fbbf24';
-      const cw=14*pr.scale, ch=20*pr.scale;
-      ctx.fillRect(pr.x+r+2,pr.y-ch,cw,ch);
-      ctx.strokeStyle='rgba(0,0,0,.5)';ctx.lineWidth=1;ctx.strokeRect(pr.x+r+2,pr.y-ch,cw,ch);
-      ctx.restore();
-    }
-  },
-  callFoul(foulingPlayer,bx,by){
-    if(this.foulCooldown>0||!foulingPlayer||foulingPlayer.ejected)return;
-    // Only ~18% of slide contacts actually draw a card — refs let a lot go
-    const drawCard=Math.random()<0.18;
-    // Always give free kick regardless of card
-    this.foulCooldown=5.0;
-    this.whistleT=1.8;
-    const giveTo=foulingPlayer.team===0?1:0;
-    if(!drawCard){
-      // Just a free kick, no card
-      triggerDeadBall(giveTo,'📣 Foul! Free Kick',bx,by,foulingPlayer.team);
-      return;
-    }
-    foulingPlayer.yellows++;
-    if(foulingPlayer.yellows>=2){
-      // RED CARD — eject player
-      foulingPlayer.ejected=true;
-      // Move off-field
-      foulingPlayer.x=-600;foulingPlayer.y=-600;
-      this.cardFlash=3.5;this.cardColor='red';
-      const team=foulingPlayer.team===0?'Your team':'CPU';
-      triggerDeadBall(giveTo,`🔴 Red Card! ${team} down to ${players.filter(p=>p.team===foulingPlayer.team&&!p.ejected).length} players`,bx,by,foulingPlayer.team);
-    } else {
-      // YELLOW CARD
-      this.cardFlash=2.5;this.cardColor='yellow';
-      triggerDeadBall(giveTo,'🟡 Yellow Card! Free Kick',bx,by,foulingPlayer.team);
-    }
+// Foul / card logic (no visible referee)
+let _foulCooldown=0;
+function callFoul(foulingPlayer,bx,by){
+  if(_foulCooldown>0||!foulingPlayer||foulingPlayer.ejected)return;
+  const drawCard=Math.random()<0.18;
+  _foulCooldown=5.0;
+  const giveTo=foulingPlayer.team===0?1:0;
+  if(!drawCard){triggerDeadBall(giveTo,'📣 Foul! Free Kick',bx,by,foulingPlayer.team);return;}
+  foulingPlayer.yellows++;
+  if(foulingPlayer.yellows>=2){
+    foulingPlayer.ejected=true;foulingPlayer.x=-600;foulingPlayer.y=-600;
+    const team=foulingPlayer.team===0?'Your team':'CPU';
+    triggerDeadBall(giveTo,`🔴 Red Card! ${team} down to ${players.filter(p=>p.team===foulingPlayer.team&&!p.ejected).length} players`,bx,by,foulingPlayer.team);
+  } else {
+    triggerDeadBall(giveTo,'🟡 Yellow Card! Free Kick',bx,by,foulingPlayer.team);
   }
-};
+}
 let rafId=null,lastTs=0;
 // ════════════════════════════════════
 //  CHARGE STATE
@@ -1636,12 +1576,10 @@ function callCorner(atkTeam,bx){
   const cx=bx<W/2?PX:PX+PW;
   const cy=lastBallSide<0?PY+5:PY+PH-5; // top or bottom corner
   triggerDeadBall(atkTeam,'🚩 Corner Kick!',cx,cy,atkTeam===0?1:0);
-  referee.cardColor='yellow';referee.whistleT=1.8;
 }
 function callGoalKick(defTeam){
   const gkx=defTeam===0?PX+35:PX+PW-35;
   triggerDeadBall(defTeam,'⚽ Goal Kick',gkx,H/2+(Math.random()-.5)*60,-1);
-  referee.whistleT=1.5;
 }
 
 // ════════════════════════════════════
@@ -2294,7 +2232,7 @@ function loop(ts){
           }
         }
       }
-      referee.update(dt);
+      if(_foulCooldown>0)_foulCooldown-=dt;
       for(const p of players){updateAI(p);p.update(dt);}
       // Check slide-tackle fouls
       if(deadBallTimer<=0){
@@ -2303,7 +2241,7 @@ function loop(ts){
           for(const opp of players){
             if(opp.team===slider.team)continue;
             if(dist(slider,opp)<slider.r+opp.r+5){
-              referee.callFoul(slider,opp.x,opp.y);
+              callFoul(slider,opp.x,opp.y);
               break;
             }
           }
@@ -2337,7 +2275,6 @@ function loop(ts){
     } else {
       [...players].sort((a,b)=>a.y-b.y).forEach(draw3DPlayer);
     }
-    referee.draw();
     drawBall();
     drawChargeArcs();
     drawGoalFlash(dt);
