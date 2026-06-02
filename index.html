@@ -1694,7 +1694,7 @@ function onGoal(team){
   updateHUD();
   const el=document.getElementById(team===0?'score-you':'score-cpu');
   el.classList.add('pop');setTimeout(()=>el.classList.remove('pop'),400);
-  setTimeout(()=>{resetKickoff();gameState='playing';},850);
+  setTimeout(()=>{resetKickoff();gameState='playing';},870);
 }
 function resetKickoff(){
   if(userPlayer) userPlayer.celebrating=false;
