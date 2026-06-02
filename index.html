@@ -745,6 +745,69 @@ let timeLeft=180;
 let timerTick=null;
 let players=[],userTeam=[],userPlayer=null;
 let goalAnim=0,goalTeam=-1;
+
+// ── DEAD BALL / REFEREE ──────────────────────────────
+let deadBallTimer=0;
+let lastBallSide=1;   // >0 = ball frozen (free kick/corner/goal kick)
+let deadBallMsg='';    // label shown during dead ball
+let deadBallBallX=W/2, deadBallBallY=H/2; // where ball snaps when resuming
+let deadBallGiveTo=-1; // team 0 or 1 gets possession on resume
+
+const referee={
+  x:W/2+60, y:H/2+90, r:9,
+  cardFlash:0, cardColor:'yellow',
+  whistleT:0,
+  foulCooldown:0, // prevent rapid foul calls
+  update(dt){
+    // Follow ball (offset to the side, slightly behind)
+    const offX=ball.y>H/2?-60:60;
+    const tx=ball.x+offX, ty=ball.y+(ball.y<H/2?70:-70);
+    const dx=tx-this.x, dy=ty-this.y, d=Math.hypot(dx,dy)||1;
+    if(d>25){this.x+=dx/d*2.2*Math.min(1,d/60);this.y+=dy/d*2.2*Math.min(1,d/60);}
+    // Stay inside field
+    this.x=Math.max(PX+14,Math.min(PX+PW-14,this.x));
+    this.y=Math.max(PY+14,Math.min(PY+PH-14,this.y));
+    if(this.cardFlash>0)this.cardFlash-=dt;
+    if(this.whistleT>0)this.whistleT-=dt;
+    if(this.foulCooldown>0)this.foulCooldown-=dt;
+  },
+  draw(){
+    const pr=project(this.x,this.y,0);
+    if(!pr)return;
+    const r=this.r*pr.scale;
+    // Shadow
+    ctx.save();ctx.globalAlpha=0.35;ctx.fillStyle='rgba(0,0,0,.7)';
+    ctx.beginPath();ctx.ellipse(pr.x,pr.groundY,r*.85,r*.28,0,0,Math.PI*2);ctx.fill();ctx.restore();
+    // Body
+    ctx.save();ctx.beginPath();ctx.arc(pr.x,pr.y,r,0,Math.PI*2);
+    ctx.fillStyle='#111111';ctx.fill();
+    ctx.strokeStyle='#fbbf24';ctx.lineWidth=Math.max(1,r*.15);ctx.stroke();
+    ctx.font=Math.max(7,r*.75)+'px system-ui';ctx.textAlign='center';
+    ctx.fillStyle='#fbbf24';ctx.fillText('REF',pr.x,pr.y+r*.35);
+    ctx.restore();
+    // Whistle animation
+    if(this.whistleT>0){
+      ctx.save();ctx.globalAlpha=Math.min(1,this.whistleT*.8);
+      ctx.font='16px system-ui';ctx.textAlign='center';
+      ctx.fillText('📣',pr.x,pr.y-r-12);ctx.restore();
+    }
+    // Card
+    if(this.cardFlash>0){
+      ctx.save();ctx.globalAlpha=Math.min(1,this.cardFlash);
+      ctx.fillStyle=this.cardColor==='red'?'#ef4444':'#fbbf24';
+      const cw=14*pr.scale, ch=20*pr.scale;
+      ctx.fillRect(pr.x+r+2,pr.y-ch,cw,ch);
+      ctx.strokeStyle='rgba(0,0,0,.5)';ctx.lineWidth=1;ctx.strokeRect(pr.x+r+2,pr.y-ch,cw,ch);
+      ctx.restore();
+    }
+  },
+  callFoul(foulingTeam,bx,by,severity='yellow'){
+    if(this.foulCooldown>0)return;
+    this.foulCooldown=4.0; // prevent rapid foul spam
+    this.cardFlash=2.5;this.cardColor=severity;this.whistleT=2.0;
+    triggerDeadBall(foulingTeam===0?1:0,'🟡 Foul! Free Kick',bx,by,foulingTeam===0?1:0);
+  }
+};
 let rafId=null,lastTs=0;
 // ════════════════════════════════════
 //  CHARGE STATE
@@ -1510,15 +1573,61 @@ function aiPass(p){
   ball.owner=null;ball.vx=(dx/d)*PASS_PWR;ball.vy=(dy/d)*PASS_PWR;p.cooldown=0.25;
 }
 function aiGKBoot(p){
-  const tx=p.team===0?PX+PW*.6:PX+PW*.4;
-  const dx=tx-p.x,dy=H/2-p.y,d=Math.hypot(dx,dy)||1;
-  ball.owner=null;ball.vx=(dx/d)*BOOT_PWR;ball.vy=(dy/d)*BOOT_PWR;p.cooldown=0.4;
+  const atkX=p.team===0?PX+PW+GD:PX-GD; // opponent's goal
+  const shoot=Math.random()<0.40; // 40% chance the GK tries to score!
+  if(shoot){
+    const gy=H/2+(Math.random()-.5)*GH*.75;
+    const dx=atkX-p.x,dy=gy-p.y,d=Math.hypot(dx,dy)||1;
+    ball.owner=null;ball.vx=(dx/d)*BOOT_PWR*1.35;ball.vy=(dy/d)*BOOT_PWR*1.35;
+    ball.z=0;ball.vz=9+Math.random()*5; // big soaring arc
+  } else {
+    // Normal clearance downfield
+    const tx=p.team===0?PX+PW*.65:PX+PW*.35;
+    const dx=tx-p.x,dy=(H/2-p.y)+(Math.random()-.5)*120,d=Math.hypot(dx,dy)||1;
+    ball.owner=null;ball.vx=(dx/d)*BOOT_PWR;ball.vy=(dy/d)*BOOT_PWR;
+    ball.z=0;ball.vz=5+Math.random()*3;
+  }
+  p.cooldown=0.5;
+}
+
+// ════════════════════════════════════
+//  DEAD BALL HELPERS
+// ════════════════════════════════════
+function triggerDeadBall(giveTo,msg,bx,by,pushTeam=-1){
+  if(gameState!=='playing')return;
+  deadBallTimer=2.2; deadBallMsg=msg;
+  deadBallBallX=bx; deadBallBallY=by; deadBallGiveTo=giveTo;
+  ball.vx=0;ball.vy=0;ball.vz=0;ball.z=0;ball.owner=null;
+  ball.x=bx;ball.y=by;
+  // Push pushTeam players 80px away from ball
+  if(pushTeam>=0){
+    for(const p of players){
+      if(p.team!==pushTeam)continue;
+      const dx=p.x-bx,dy=p.y-by,d=Math.hypot(dx,dy)||1;
+      if(d<85){p.x=bx+(dx/d)*88;p.y=by+(dy/d)*88;}
+    }
+  }
+  referee.whistleT=2.0;
+}
+function callCorner(atkTeam,bx){
+  // Corner flag positions
+  const cx=bx<W/2?PX:PX+PW;
+  const cy=lastBallSide<0?PY+5:PY+PH-5; // top or bottom corner
+  triggerDeadBall(atkTeam,'🚩 Corner Kick!',cx,cy,atkTeam===0?1:0);
+  referee.cardColor='yellow';referee.whistleT=1.8;
+}
+function callGoalKick(defTeam){
+  const gkx=defTeam===0?PX+35:PX+PW-35;
+  triggerDeadBall(defTeam,'⚽ Goal Kick',gkx,H/2+(Math.random()-.5)*60,-1);
+  referee.whistleT=1.5;
 }
 
 // ════════════════════════════════════
 //  BALL
 // ════════════════════════════════════
 function updateBall(){
+  // ── Dead ball: ball frozen until timer expires ──
+  if(deadBallTimer>0){ball.vx=0;ball.vy=0;ball.z=0;ball.vz=0;return;}
   if(ball.owner)return;
 
   // Magnus effect: spin curves the ball laterally
@@ -1543,6 +1652,7 @@ function updateBall(){
 
   // Goal / wall collisions
   const inY=ball.y>=GT&&ball.y<=GB;
+  if(ball.y<H/2)lastBallSide=-1;else lastBallSide=1;
   if(ball.y-ball.r<PY){
     ball.y=PY+ball.r;
     ball.vy=Math.abs(ball.vy)*.72;
@@ -1555,18 +1665,22 @@ function updateBall(){
   }
   if(ball.x-ball.r<PX){
     if(inY&&ball.x<PX-GD){onGoal(1);return;}
-    else if(!inY){
-      ball.x=PX+ball.r;
-      ball.vx=Math.abs(ball.vx)*.7;
-      ball.vy+=ball.spin*0.1; // spin deflects off wall
+    else if(inY){ ball.x=PX+ball.r; ball.vx=Math.abs(ball.vx)*.7; } // hit post area
+    else{
+      // Ball behind LEFT goal line (no goal) → corner or goal kick
+      if(lastBallTeam===1){callCorner(0,PX);}   // CPU last touched → corner for user
+      else{callGoalKick(0);}                      // User last touched → goal kick for user GK
+      return;
     }
   }
   if(ball.x+ball.r>PX+PW){
     if(inY&&ball.x>PX+PW+GD){onGoal(0);return;}
-    else if(!inY){
-      ball.x=PX+PW-ball.r;
-      ball.vx=-Math.abs(ball.vx)*.7;
-      ball.vy+=ball.spin*0.1;
+    else if(inY){ ball.x=PX+PW-ball.r; ball.vx=-Math.abs(ball.vx)*.7; }
+    else{
+      // Ball behind RIGHT goal line (no goal) → corner or goal kick
+      if(lastBallTeam===0){callCorner(1,PX+PW);}  // User last touched → corner for CPU
+      else{callGoalKick(1);}                        // CPU last touched → goal kick for CPU GK
+      return;
     }
   }
 }
@@ -2145,7 +2259,33 @@ function loop(ts){
       playerPerf=playerPerf*0.994+_tgt*0.006;
       if(brain.adaptFlash>0)brain.adaptFlash-=dt;
       if(camModeFlash>0)camModeFlash-=dt;
+      if(deadBallTimer>0){
+        deadBallTimer-=dt;
+        if(deadBallTimer<=0){
+          // Resume: give ball to the correct team's nearest player
+          ball.x=deadBallBallX;ball.y=deadBallBallY;
+          if(deadBallGiveTo>=0){
+            let near=null,bd=Infinity;
+            for(const p of players){if(p.team!==deadBallGiveTo)continue;const dd=dist(p,ball);if(dd<bd){bd=dd;near=p;}}
+            if(near){ball.owner=near;near.cooldown=0;}
+          }
+        }
+      }
+      referee.update(dt);
       for(const p of players){updateAI(p);p.update(dt);}
+      // Check slide-tackle fouls
+      if(deadBallTimer<=0){
+        for(const slider of players){
+          if(!slider.sliding)continue;
+          for(const opp of players){
+            if(opp.team===slider.team)continue;
+            if(dist(slider,opp)<slider.r+opp.r+5){
+              if(Math.random()<0.65) referee.callFoul(slider.team,opp.x,opp.y);
+              break;
+            }
+          }
+        }
+      }
       updateBall();
     }
     // Update FPS camera angle (smoothly tracks movement direction)
@@ -2174,11 +2314,23 @@ function loop(ts){
     } else {
       [...players].sort((a,b)=>a.y-b.y).forEach(draw3DPlayer);
     }
+    referee.draw();
     drawBall();
     drawChargeArcs();
     drawGoalFlash(dt);
     drawOverlay();
     if(camMode===4){drawMinimapFPS();drawFPSCrosshair();}
+    // Dead-ball message overlay
+    if(deadBallTimer>0){
+      const alpha=Math.min(1,deadBallTimer*1.2);
+      ctx.save();ctx.globalAlpha=alpha;
+      ctx.font='bold 22px system-ui';ctx.textAlign='center';
+      const tw=ctx.measureText(deadBallMsg).width+32;
+      ctx.fillStyle='rgba(0,0,0,.6)';
+      rRect(ctx,W/2-tw/2,H/2-22,tw,36,10);ctx.fill();
+      ctx.fillStyle='#ffffff';ctx.fillText(deadBallMsg,W/2,H/2+3);
+      ctx.restore();
+    }
   }
   rafId=requestAnimationFrame(loop);
 }
