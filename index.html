@@ -801,11 +801,33 @@ const referee={
       ctx.restore();
     }
   },
-  callFoul(foulingTeam,bx,by,severity='yellow'){
-    if(this.foulCooldown>0)return;
-    this.foulCooldown=4.0; // prevent rapid foul spam
-    this.cardFlash=2.5;this.cardColor=severity;this.whistleT=2.0;
-    triggerDeadBall(foulingTeam===0?1:0,'🟡 Foul! Free Kick',bx,by,foulingTeam===0?1:0);
+  callFoul(foulingPlayer,bx,by){
+    if(this.foulCooldown>0||!foulingPlayer||foulingPlayer.ejected)return;
+    // Only ~18% of slide contacts actually draw a card — refs let a lot go
+    const drawCard=Math.random()<0.18;
+    // Always give free kick regardless of card
+    this.foulCooldown=5.0;
+    this.whistleT=1.8;
+    const giveTo=foulingPlayer.team===0?1:0;
+    if(!drawCard){
+      // Just a free kick, no card
+      triggerDeadBall(giveTo,'📣 Foul! Free Kick',bx,by,foulingPlayer.team);
+      return;
+    }
+    foulingPlayer.yellows++;
+    if(foulingPlayer.yellows>=2){
+      // RED CARD — eject player
+      foulingPlayer.ejected=true;
+      // Move off-field
+      foulingPlayer.x=-600;foulingPlayer.y=-600;
+      this.cardFlash=3.5;this.cardColor='red';
+      const team=foulingPlayer.team===0?'Your team':'CPU';
+      triggerDeadBall(giveTo,`🔴 Red Card! ${team} down to ${players.filter(p=>p.team===foulingPlayer.team&&!p.ejected).length} players`,bx,by,foulingPlayer.team);
+    } else {
+      // YELLOW CARD
+      this.cardFlash=2.5;this.cardColor='yellow';
+      triggerDeadBall(giveTo,'🟡 Yellow Card! Free Kick',bx,by,foulingPlayer.team);
+    }
   }
 };
 let rafId=null,lastTs=0;
@@ -1453,27 +1475,27 @@ function updateAI(p){
   // ── GOALKEEPER (both teams) ───────────────────────
   if(p.role==='goalkeeper'){
     const IMP=DIFFICULTIES[3]; // friendly GK always on Impossible
-    // CPU GK is deliberately sluggish so the player can score more easily
-    const cpuGkSpd = spd * 0.48;           // CPU GK runs at 48% speed
+    // CPU GK is deliberately sluggish — easy to score on
+    const cpuGkSpd = spd * 0.30;           // CPU GK runs at 30% speed
     const gkSpd=p.team===0?IMP.gkSpd:cpuGkSpd;
     const lineX=p.team===0?PX+20:PX+PW-20;
-    // CPU GK only tracks 55% toward ball.y — reacts slowly and imprecisely
+    // CPU GK tracks only 38% toward ball.y — barely moves
     const cpuTrack = p.team===1
-      ? H/2 + (ball.y - H/2) * 0.55 + (brain.avgShotY * brain.shotConf * 0.3)
+      ? H/2 + (ball.y - H/2) * 0.38 + (brain.avgShotY * brain.shotConf * 0.15)
       : ball.y;
     const tY=Math.max(GT+p.r,Math.min(GB-p.r,cpuTrack));
     moveTo(p,lineX,tY,gkSpd);
-    // CPU GK only rushes out when ball is very close (70px vs old 130px)
-    const closeX=p.team===0?PX+130:PX+PW-70;
+    // CPU GK barely leaves the line (50px rush zone)
+    const closeX=p.team===0?PX+130:PX+PW-50;
     const danger=p.team===0?ball.x<closeX:ball.x>closeX;
     if(danger)moveTo(p,ball.x,ball.y,gkSpd);
     if(ball.owner===p&&Math.random()<0.06)aiGKBoot(p);
     if(!ball.owner&&Math.abs(ball.vy)<4){
       const app=p.team===0?ball.vx<-3:ball.vx>3;
-      // CPU GK block chance is 20% of normal — misses most shots
+      // CPU GK block chance is 8% of normal — almost always beaten
       const bChance=p.team===0
         ?IMP.blockChance
-        :(diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance)*0.20;
+        :(diff.blockChance+(1-brain.passRate)*brain.shotConf*diff.blockChance)*0.08;
       if(app&&Math.abs(ball.y-H/2)<GH*.7&&Math.random()<bChance){
         p.blocking=true;p.blockT=0.55;p.blockCd=1.0;
       }
@@ -2107,6 +2129,7 @@ function drawOverlay(){
 //  3-D PLAYER RENDERER
 // ════════════════════════════════════
 function draw3DPlayer(p){
+  if(p.ejected) return; // red-carded — off the pitch
   if(camMode===4&&p.isUser) return; // FPS: don't draw yourself
   const px3=(p.celebrating&&p.celebX)?p.x+p.celebX:p.x;
   const pr=project(px3,p.y,0);
@@ -2280,7 +2303,7 @@ function loop(ts){
           for(const opp of players){
             if(opp.team===slider.team)continue;
             if(dist(slider,opp)<slider.r+opp.r+5){
-              if(Math.random()<0.65) referee.callFoul(slider.team,opp.x,opp.y);
+              referee.callFoul(slider,opp.x,opp.y);
               break;
             }
           }
