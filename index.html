@@ -153,7 +153,7 @@ kbd{
   <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">R</kbd> Steal</div>
   <div class="ctrl" style="color:#94a3b8"><kbd style="border-color:#94a3b8aa;color:#94a3b8">P</kbd> Pause</div>
   <div class="ctrl" style="color:#f472b6"><kbd style="border-color:#f472b6aa;color:#f472b6">C</kbd> Emote (after goal)</div>
-  <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">F</kbd> Camera view</div>
+  <div class="ctrl" style="color:#a78bfa"><kbd style="border-color:#a78bfaaa;color:#a78bfa">F</kbd> Camera (5 views)</div>
 </div>
 
 <!-- Splash -->
@@ -560,9 +560,10 @@ const W=1100,H=660;
 //  CAMERA SYSTEM  (F = cycle modes)
 // ════════════════════════════════════
 const BALL_GRAVITY = 0.18;
-const CAM_NAMES = ['🎥 Isometric','🛸 Top-Down','📺 Broadcast','🎮 Behind Player'];
-let camMode = 0;       // 0=iso  1=top  2=broadcast  3=chase
+const CAM_NAMES = ['🎥 Isometric','🛸 Top-Down','📺 Broadcast','🎮 Behind Player','👁️ First Person'];
+let camMode = 0;       // 0=iso  1=top  2=broadcast  3=chase  4=fps
 let camModeFlash = 0;  // seconds to show mode label
+let camFpsAngle = 0;   // FPS camera facing angle (radians, 0=right)
 
 // Pre-bake crowd (stable positions)
 const _crowd3 = Object.freeze(Array.from({length:500},()=>({
@@ -610,11 +611,26 @@ function _projChase(gx,gy,gz=0){
   return{x:W/2+lat*sc,y:groundY-gz*sc,scale:Math.max(0.03,Math.min(8,sc/48)),t:(gy-PY)/PH,groundY};
 }
 
+// ── Mode 4: First-Person (from player's eyes) ─────
+function _projFPS(gx,gy,gz=0){
+  if(!userPlayer) return _projIso(gx,gy,gz);
+  const CAM_H=42,FOCAL=580,HORIZON=H*0.44;
+  const dx=gx-userPlayer.x, dy=gy-userPlayer.y;
+  const cosA=Math.cos(camFpsAngle), sinA=Math.sin(camFpsAngle);
+  const fwd=dx*cosA+dy*sinA;   // depth (positive = in front)
+  const lat=-dx*sinA+dy*cosA;  // lateral (positive = right of camera)
+  if(fwd<1) return null;
+  const sc=FOCAL/fwd;
+  const groundY=HORIZON+CAM_H*sc;
+  return{x:W/2+lat*sc, y:groundY-gz*sc, scale:Math.max(0.02,Math.min(14,sc/42)), fwd, groundY};
+}
+
 function project(gx,gy,gz=0){
   switch(camMode){
     case 1: return _projTop(gx,gy,gz);
     case 2: return _projTV(gx,gy,gz);
     case 3: return _projChase(gx,gy,gz);
+    case 4: return _projFPS(gx,gy,gz);
     default: return _projIso(gx,gy,gz);
   }
 }
@@ -1642,6 +1658,63 @@ function drawPitch(){
     goalC(PX,1);goalC(PX+PW,-1);
     return;
   }
+  // ── FIRST-PERSON mode ──
+  if(camMode===4){
+    const HORIZON=H*0.44;
+    const skyG=ctx.createLinearGradient(0,0,0,HORIZON+30);
+    skyG.addColorStop(0,'#020816');skyG.addColorStop(0.7,'#0f2044');skyG.addColorStop(1,'#1a3060');
+    ctx.fillStyle=skyG;ctx.fillRect(0,0,W,HORIZON+30);
+    const gndG=ctx.createLinearGradient(0,HORIZON,0,H);
+    gndG.addColorStop(0,'#071a0a');gndG.addColorStop(0.2,'#0d2e16');gndG.addColorStop(1,'#166534');
+    ctx.fillStyle=gndG;ctx.fillRect(0,HORIZON,W,H-HORIZON);
+    // Floodlights
+    [[110,35],[W-110,35],[55,130],[W-55,130]].forEach(([lx,ly])=>{
+      ctx.save();ctx.shadowColor='#fffde7';ctx.shadowBlur=30;
+      ctx.fillStyle='#fff9c4';ctx.beginPath();ctx.arc(lx,ly,4,0,Math.PI*2);ctx.fill();ctx.restore();
+    });
+    // Crowd in stands
+    _crowd3.forEach(({x,y,col,r})=>{ctx.fillStyle=col+'88';ctx.beginPath();ctx.arc(x,y*(HORIZON/155),r,0,Math.PI*2);ctx.fill();});
+    // Field lines in FPS projection
+    ctx.strokeStyle='rgba(255,255,255,.72)';ctx.lineWidth=2;
+    function LF(x1,y1,x2,y2){
+      const a=_projFPS(x1,y1,0),b=_projFPS(x2,y2,0);
+      if(!a||!b)return;
+      ctx.beginPath();ctx.moveTo(a.x,Math.max(HORIZON,a.y));ctx.lineTo(b.x,Math.max(HORIZON,b.y));ctx.stroke();
+    }
+    [[PX,PY,PX+PW,PY],[PX,PY+PH,PX+PW,PY+PH],[PX,PY,PX,PY+PH],[PX+PW,PY,PX+PW,PY+PH],
+     [W/2,PY,W/2,PY+PH],[PX,H/2-100,PX+110,H/2-100],[PX+110,H/2-100,PX+110,H/2+100],
+     [PX,H/2+100,PX+110,H/2+100],[PX+PW,H/2-100,PX+PW-110,H/2-100],
+     [PX+PW-110,H/2-100,PX+PW-110,H/2+100],[PX+PW,H/2+100,PX+PW-110,H/2+100]].forEach(l=>LF(...l));
+    // Center circle
+    ctx.beginPath();let mv=false;
+    for(let i=0;i<=48;i++){const a=(i/48)*Math.PI*2,pp=_projFPS(W/2+Math.cos(a)*70,H/2+Math.sin(a)*70,0);if(!pp){mv=false;continue;}mv?ctx.lineTo(pp.x,Math.max(HORIZON,pp.y)):(ctx.moveTo(pp.x,Math.max(HORIZON,pp.y)),mv=true);}
+    ctx.stroke();
+    // Goals (3D posts in FPS)
+    const PH3=55;
+    function goalF(gx,dir){
+      ctx.lineWidth=4;ctx.strokeStyle='#f1f5f9';ctx.shadowColor='rgba(255,255,255,.5)';ctx.shadowBlur=8;
+      [GT,GB].forEach(py=>{
+        const b=_projFPS(gx,py,0),t=_projFPS(gx,py,PH3);
+        if(b&&t){ctx.beginPath();ctx.moveTo(b.x,Math.max(HORIZON,b.y));ctx.lineTo(t.x,t.y);ctx.stroke();}
+        ctx.lineWidth=2;ctx.strokeStyle='#94a3b8';ctx.shadowBlur=0;
+        const db=_projFPS(gx+dir*GD,py,0),dt=_projFPS(gx+dir*GD,py,PH3);
+        if(b&&db){ctx.beginPath();ctx.moveTo(b.x,Math.max(HORIZON,b.y));ctx.lineTo(db.x,Math.max(HORIZON,db.y));ctx.stroke();}
+        if(t&&dt){ctx.beginPath();ctx.moveTo(t.x,t.y);ctx.lineTo(dt.x,dt.y);ctx.stroke();}
+        ctx.lineWidth=4;ctx.strokeStyle='#f1f5f9';ctx.shadowColor='rgba(255,255,255,.5)';ctx.shadowBlur=8;
+      });
+      const ct=_projFPS(gx,GT,PH3),cb=_projFPS(gx,GB,PH3);
+      if(ct&&cb){ctx.beginPath();ctx.moveTo(ct.x,ct.y);ctx.lineTo(cb.x,cb.y);ctx.stroke();}
+      ctx.shadowBlur=0;
+      // Net lines
+      ctx.lineWidth=0.8;ctx.strokeStyle='rgba(255,255,255,.12)';
+      for(let nz=0;nz<=PH3;nz+=12){
+        const n1=_projFPS(gx,GT,nz),n2=_projFPS(gx,GB,nz);
+        if(n1&&n2){ctx.beginPath();ctx.moveTo(n1.x,n1.y);ctx.lineTo(n2.x,n2.y);ctx.stroke();}
+      }
+    }
+    goalF(PX,1);goalF(PX+PW,-1);
+    return;
+  }
   // ── ISOMETRIC / BROADCAST (modes 0 & 2) ──
   const skyTop=camMode===2?225:155;
   const sky=ctx.createLinearGradient(0,0,0,skyTop+55);
@@ -1920,8 +1993,10 @@ function drawOverlay(){
 //  3-D PLAYER RENDERER
 // ════════════════════════════════════
 function draw3DPlayer(p){
+  if(camMode===4&&p.isUser) return; // FPS: don't draw yourself
   const px3=(p.celebrating&&p.celebX)?p.x+p.celebX:p.x;
   const pr=project(px3,p.y,0);
+  if(!pr) return; // behind FPS camera
   const r=p.r*pr.scale;
   // Ground shadow
   ctx.save();ctx.globalAlpha=0.38;
@@ -1990,6 +2065,60 @@ function draw3DPlayer(p){
   }
 }
 
+
+// ════════════════════════════════════
+//  FPS MINIMAP + CROSSHAIR
+// ════════════════════════════════════
+function drawMinimapFPS(){
+  const MX=W-148,MY=H-108,MW=135,MH=93;
+  ctx.save();
+  ctx.globalAlpha=0.82;
+  // Border + bg
+  ctx.fillStyle='#0f172a';
+  ctx.beginPath();if(ctx.roundRect)ctx.roundRect(MX-2,MY-2,MW+4,MH+4,6);else ctx.rect(MX-2,MY-2,MW+4,MH+4);ctx.fill();
+  // Field
+  ctx.fillStyle='#14532d';ctx.fillRect(MX,MY,MW,MH);
+  // Halfway line
+  ctx.strokeStyle='rgba(255,255,255,.25)';ctx.lineWidth=0.8;
+  ctx.beginPath();ctx.moveTo(MX+MW/2,MY);ctx.lineTo(MX+MW/2,MY+MH);ctx.stroke();
+  // Convert game → minimap
+  function mm(gx,gy){return{x:MX+(gx-PX)/PW*MW, y:MY+(gy-PY)/PH*MH};}
+  // Players
+  for(const p of players){
+    const m=mm(p.x,p.y);
+    ctx.fillStyle=p.isUser?'#fbbf24':p.team===0?'#38bdf8':'#f87171';
+    ctx.beginPath();ctx.arc(m.x,m.y,p.isUser?4:2.8,0,Math.PI*2);ctx.fill();
+  }
+  // Ball
+  const mb=mm(ball.x,ball.y);
+  ctx.fillStyle='#ffffff';ctx.beginPath();ctx.arc(mb.x,mb.y,2.5,0,Math.PI*2);ctx.fill();
+  // Camera direction cone
+  if(userPlayer){
+    const mu=mm(userPlayer.x,userPlayer.y);
+    ctx.strokeStyle='#fbbf24';ctx.lineWidth=1.5;
+    const FOV=0.55;
+    ctx.beginPath();
+    ctx.moveTo(mu.x,mu.y);
+    ctx.lineTo(mu.x+Math.cos(camFpsAngle-FOV)*18,mu.y+Math.sin(camFpsAngle-FOV)*18);
+    ctx.moveTo(mu.x,mu.y);
+    ctx.lineTo(mu.x+Math.cos(camFpsAngle+FOV)*18,mu.y+Math.sin(camFpsAngle+FOV)*18);
+    ctx.stroke();
+  }
+  // Label
+  ctx.fillStyle='rgba(255,255,255,.4)';ctx.font='8px system-ui';ctx.textAlign='left';
+  ctx.fillText('MAP',MX+4,MY+10);
+  ctx.restore();
+}
+
+function drawFPSCrosshair(){
+  const cx=W/2,cy=H/2,g=9,s=4;
+  ctx.save();ctx.strokeStyle='rgba(255,255,255,.65)';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(cx-g,cy);ctx.lineTo(cx-s,cy);ctx.moveTo(cx+s,cy);ctx.lineTo(cx+g,cy);
+  ctx.moveTo(cx,cy-g);ctx.lineTo(cx,cy-s);ctx.moveTo(cx,cy+s);ctx.lineTo(cx,cy+g);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ════════════════════════════════════
 //  LOOP
 // ════════════════════════════════════
@@ -2019,12 +2148,37 @@ function loop(ts){
       for(const p of players){updateAI(p);p.update(dt);}
       updateBall();
     }
-    // Depth-sort: far players (low y) drawn first → proper occlusion
-    [...players].sort((a,b)=>a.y-b.y).forEach(draw3DPlayer);
-    drawBall(); // 3D ball with z-arc + shadow
+    // Update FPS camera angle (smoothly tracks movement direction)
+    if(camMode===4&&userPlayer){
+      const mdx=(keys['ArrowRight']?1:0)-(keys['ArrowLeft']?1:0);
+      const mdy=(keys['ArrowDown']?1:0)-(keys['ArrowUp']?1:0);
+      if(mdx||mdy){
+        let tgt=Math.atan2(mdy,mdx);
+        let diff=tgt-camFpsAngle;
+        while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
+        camFpsAngle+=diff*0.14;
+      } else {
+        // Idle: slowly face attacking goal (team 0 → right, team 1 → left)
+        const tgt=userPlayer.team===0?0:Math.PI;
+        let diff=tgt-camFpsAngle;
+        while(diff>Math.PI)diff-=Math.PI*2;while(diff<-Math.PI)diff+=Math.PI*2;
+        camFpsAngle+=diff*0.025;
+      }
+    }
+    // Depth-sort by distance to camera in FPS mode, else by y
+    if(camMode===4){
+      [...players].sort((a,b)=>{
+        const pa=_projFPS(a.x,a.y,0),pb=_projFPS(b.x,b.y,0);
+        return (pb?pb.fwd:0)-(pa?pa.fwd:0); // far first
+      }).forEach(draw3DPlayer);
+    } else {
+      [...players].sort((a,b)=>a.y-b.y).forEach(draw3DPlayer);
+    }
+    drawBall();
     drawChargeArcs();
     drawGoalFlash(dt);
     drawOverlay();
+    if(camMode===4){drawMinimapFPS();drawFPSCrosshair();}
   }
   rafId=requestAnimationFrame(loop);
 }
