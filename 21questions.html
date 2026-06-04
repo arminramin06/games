@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>21 Questions</title>
+  <meta name="description" content="One player picks a secret. The other has 21 yes/no questions and 3 guesses to crack it."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+    :root{
+      --bg:#0a0612;
+      --surface:rgba(255,255,255,.05);
+      --border:rgba(255,255,255,.1);
+      --purple:#a855f7;
+      --pink:#ec4899;
+      --grad:linear-gradient(135deg,var(--purple),var(--pink));
+    }
+    html,body{min-height:100vh;background:var(--bg);font-family:'Outfit',sans-serif;color:#fff;overflow-x:hidden;}
+    body::before{content:'';position:fixed;inset:0;z-index:0;
+      background:radial-gradient(ellipse 70% 50% at 20% 0%,rgba(168,85,247,.2) 0%,transparent 70%),
+                 radial-gradient(ellipse 50% 40% at 80% 100%,rgba(236,72,153,.18) 0%,transparent 70%);
+      pointer-events:none;}
+
+    /* ── SCREENS ── */
+    .screen{position:relative;z-index:1;display:none;min-height:100vh;padding:32px 20px;
+      flex-direction:column;align-items:center;justify-content:center;gap:24px;}
+    .screen.active{display:flex;}
+
+    /* ── HEADER ── */
+    .back{position:absolute;top:20px;left:20px;background:none;border:none;color:rgba(255,255,255,.4);
+      font-size:.9rem;font-family:'Outfit',sans-serif;cursor:pointer;display:flex;align-items:center;gap:6px;
+      transition:color .2s;}
+    .back:hover{color:#fff;}
+    .game-title{font-size:clamp(2rem,6vw,3.2rem);font-weight:900;letter-spacing:-.02em;
+      background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+      filter:drop-shadow(0 0 30px rgba(168,85,247,.5));text-align:center;}
+    .subtitle{font-size:1rem;font-weight:300;color:rgba(255,255,255,.45);text-align:center;}
+
+    /* ── CARD ── */
+    .card{width:100%;max-width:520px;background:var(--surface);border:1px solid var(--border);
+      border-radius:20px;padding:32px;backdrop-filter:blur(16px);}
+
+    /* ── INPUTS ── */
+    input[type=text],textarea{
+      width:100%;padding:14px 18px;border-radius:12px;border:1.5px solid var(--border);
+      background:rgba(255,255,255,.06);color:#fff;font-family:'Outfit',sans-serif;font-size:1rem;
+      outline:none;transition:border-color .2s,box-shadow .2s;resize:none;}
+    input[type=text]:focus,textarea:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(168,85,247,.2);}
+    input[type=text]::placeholder,textarea::placeholder{color:rgba(255,255,255,.3);}
+
+    /* ── BUTTONS ── */
+    .btn{padding:14px 28px;border-radius:12px;border:none;font-family:'Outfit',sans-serif;
+      font-size:1rem;font-weight:700;cursor:pointer;transition:transform .15s,opacity .15s;letter-spacing:.01em;}
+    .btn:hover{opacity:.88;transform:translateY(-1px);}
+    .btn:active{transform:translateY(0);}
+    .btn-grad{background:var(--grad);color:#fff;box-shadow:0 4px 20px rgba(168,85,247,.4);}
+    .btn-outline{background:transparent;color:#fff;border:1.5px solid var(--border);}
+    .btn-yes{background:linear-gradient(135deg,#22c55e,#16a34a);color:#fff;box-shadow:0 4px 16px rgba(34,197,94,.3);}
+    .btn-no{background:linear-gradient(135deg,#ef4444,#dc2626);color:#fff;box-shadow:0 4px 16px rgba(239,68,68,.3);}
+    .btn-sorta{background:linear-gradient(135deg,#f59e0b,#d97706);color:#fff;box-shadow:0 4px 16px rgba(245,158,11,.3);}
+    .btn-guess{background:linear-gradient(135deg,var(--pink),#be123c);color:#fff;box-shadow:0 4px 16px rgba(236,72,153,.35);}
+    .btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;width:100%;}
+
+    /* ── COUNTER ── */
+    .counter-ring{position:relative;width:110px;height:110px;flex-shrink:0;}
+    .counter-ring svg{width:100%;height:100%;transform:rotate(-90deg);}
+    .ring-bg{fill:none;stroke:rgba(255,255,255,.1);stroke-width:7;}
+    .ring-fill{fill:none;stroke-width:7;stroke-linecap:round;
+      stroke:url(#ringGrad);transition:stroke-dashoffset .5s ease;}
+    .counter-num{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+      justify-content:center;font-weight:900;font-size:1.8rem;line-height:1;}
+    .counter-label{font-size:.6rem;font-weight:400;color:rgba(255,255,255,.4);letter-spacing:.06em;margin-top:2px;}
+
+    /* ── QUESTION LOG ── */
+    .log{max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;
+      scrollbar-width:thin;scrollbar-color:rgba(168,85,247,.4) transparent;}
+    .log::-webkit-scrollbar{width:4px;}
+    .log::-webkit-scrollbar-thumb{background:rgba(168,85,247,.4);border-radius:4px;}
+    .log-item{padding:10px 14px;border-radius:10px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);}
+    .log-q{font-size:.82rem;color:rgba(255,255,255,.5);margin-bottom:3px;}
+    .log-a{font-size:.95rem;font-weight:600;}
+    .log-a.yes{color:#4ade80;}.log-a.no{color:#f87171;}.log-a.sorta{color:#fbbf24;}
+
+    /* ── GUESS CHIPS ── */
+    .guess-chips{display:flex;gap:8px;}
+    .chip{width:28px;height:28px;border-radius:50%;background:var(--grad);
+      display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;}
+    .chip.used{background:rgba(255,255,255,.1);color:rgba(255,255,255,.3);}
+
+    /* ── REVEAL ── */
+    .secret-reveal{font-size:2.5rem;font-weight:900;text-align:center;padding:18px 24px;
+      border-radius:16px;background:rgba(168,85,247,.12);border:1.5px solid rgba(168,85,247,.3);
+      background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+    .result-icon{font-size:5rem;animation:pop .5s cubic-bezier(.34,1.56,.64,1);}
+    @keyframes pop{0%{transform:scale(0);opacity:0;}100%{transform:scale(1);opacity:1;}}
+    .result-title{font-size:2rem;font-weight:900;text-align:center;}
+
+    /* ── PASS SCREEN ── */
+    .pass-box{text-align:center;padding:28px;border-radius:20px;
+      background:rgba(168,85,247,.08);border:1.5px solid rgba(168,85,247,.3);}
+    .pass-icon{font-size:3.5rem;margin-bottom:12px;}
+    .pass-text{font-size:1.1rem;font-weight:600;margin-bottom:6px;}
+    .pass-sub{font-size:.875rem;color:rgba(255,255,255,.4);}
+
+    /* ── PROGRESS BAR ── */
+    .q-progress{width:100%;height:4px;background:rgba(255,255,255,.08);border-radius:2px;overflow:hidden;}
+    .q-progress-fill{height:100%;background:var(--grad);border-radius:2px;transition:width .4s ease;}
+
+    /* ── CONFETTI ── */
+    .confetti-piece{position:fixed;top:-10px;border-radius:2px;animation:fall linear forwards;pointer-events:none;z-index:999;}
+    @keyframes fall{0%{transform:translateY(0) rotate(0deg);opacity:1;}
+                   100%{transform:translateY(110vh) rotate(720deg);opacity:0;}}
+
+    label{font-size:.85rem;font-weight:600;color:rgba(255,255,255,.5);letter-spacing:.05em;text-transform:uppercase;display:block;margin-bottom:8px;}
+    .hint{font-size:.8rem;color:rgba(255,255,255,.3);margin-top:6px;}
+    .divider{width:100%;height:1px;background:var(--border);}
+    .flex-col{display:flex;flex-direction:column;gap:14px;width:100%;max-width:520px;}
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 1 — HOME                  -->
+<!-- ══════════════════════════════════ -->
+<div class="screen active" id="screen-home">
+  <a class="back" href="/" id="back-home">← Arcade</a>
+  <div class="game-title">🧠 21 Questions</div>
+  <p class="subtitle">One secret. 21 questions. 3 guesses.</p>
+
+  <div class="card" style="text-align:center;">
+    <p style="color:rgba(255,255,255,.55);font-size:.95rem;line-height:1.7;margin-bottom:24px;">
+      <strong style="color:#fff;">Player 1</strong> secretly picks a person, place, or thing.<br>
+      <strong style="color:#fff;">Player 2</strong> asks yes/no questions to figure it out.<br>
+      Run out of questions? Use a direct guess — you only get <strong style="color:#ec4899;">3</strong>.
+    </p>
+    <button class="btn btn-grad" id="btn-start" style="width:100%;font-size:1.1rem;padding:16px;">
+      Start Game
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 2 — PLAYER 1 ENTERS SECRET -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-secret">
+  <button class="back" id="back-secret">← Back</button>
+  <div class="game-title" style="font-size:2rem;">Player 1's Turn</div>
+  <p class="subtitle">Enter your secret — then pass the device</p>
+
+  <div class="flex-col">
+    <div class="card">
+      <label for="secret-input">🔒 Your Secret</label>
+      <input type="password" id="secret-input" placeholder="e.g. Eiffel Tower, Beyoncé, a submarine…" autocomplete="off" maxlength="80"/>
+      <p class="hint">Player 2 must NOT see this screen.</p>
+    </div>
+
+    <div class="pass-box">
+      <div class="pass-icon">📱</div>
+      <div class="pass-text">When ready, hand the phone/laptop to Player 2</div>
+      <div class="pass-sub">Player 2 will tap "I'm Ready" to start asking</div>
+    </div>
+
+    <button class="btn btn-grad" id="btn-confirm-secret" style="width:100%;font-size:1.05rem;padding:15px;">
+      Lock In Secret →
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 3 — PASS TO PLAYER 2      -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-pass">
+  <div style="text-align:center;max-width:400px;">
+    <div style="font-size:5rem;margin-bottom:16px;filter:drop-shadow(0 0 20px rgba(168,85,247,.6))">🙈</div>
+    <div class="game-title" style="font-size:2.2rem;margin-bottom:10px;">Pass to Player 2</div>
+    <p class="subtitle" style="margin-bottom:32px;">Player 1 — look away now!</p>
+    <button class="btn btn-grad" id="btn-p2-ready" style="font-size:1.1rem;padding:16px 40px;">
+      I'm Ready — Start Asking!
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 4 — QUESTION MODE         -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-question" style="justify-content:flex-start;padding-top:28px;">
+  <div style="width:100%;max-width:540px;display:flex;flex-direction:column;gap:18px;">
+
+    <!-- Top bar -->
+    <div style="display:flex;align-items:center;gap:16px;">
+      <div class="counter-ring">
+        <svg viewBox="0 0 110 110">
+          <defs>
+            <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#a855f7"/>
+              <stop offset="100%" stop-color="#ec4899"/>
+            </linearGradient>
+          </defs>
+          <circle class="ring-bg" cx="55" cy="55" r="48"/>
+          <circle class="ring-fill" id="ring-fill" cx="55" cy="55" r="48"
+            stroke-dasharray="301.6" stroke-dashoffset="0"/>
+        </svg>
+        <div class="counter-num">
+          <span id="q-count">21</span>
+          <span class="counter-label">LEFT</span>
+        </div>
+      </div>
+      <div style="flex:1;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:.8rem;color:rgba(255,255,255,.4);letter-spacing:.06em;text-transform:uppercase;">Questions</span>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:.8rem;color:rgba(255,255,255,.4);">Guesses</span>
+            <div class="guess-chips" id="guess-chips">
+              <div class="chip">1</div><div class="chip">2</div><div class="chip">3</div>
+            </div>
+          </div>
+        </div>
+        <div class="q-progress"><div class="q-progress-fill" id="q-bar" style="width:100%"></div></div>
+      </div>
+    </div>
+
+    <!-- Q&A Log -->
+    <div class="card" style="padding:16px;" id="log-card">
+      <div class="log" id="qa-log">
+        <p style="color:rgba(255,255,255,.25);font-size:.85rem;text-align:center;padding:8px 0;">
+          No questions asked yet. Go for it!
+        </p>
+      </div>
+    </div>
+
+    <!-- Ask a question -->
+    <div class="card">
+      <label for="q-input">❓ Ask a yes/no question</label>
+      <textarea id="q-input" rows="2" placeholder="Is it a living thing? Is it bigger than a car?…" maxlength="200"></textarea>
+    </div>
+
+    <button class="btn btn-grad" id="btn-ask" style="width:100%;font-size:1.05rem;padding:15px;">
+      Ask Question →
+    </button>
+
+    <div class="divider"></div>
+
+    <button class="btn btn-guess" id="btn-make-guess" style="width:100%;padding:14px;">
+      🎯 Make a Direct Guess (<span id="guesses-left">3</span> remaining)
+    </button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 5 — PLAYER 1 ANSWERS      -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-answer">
+  <div style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:20px;align-items:center;">
+    <div style="font-size:.9rem;color:rgba(255,255,255,.4);letter-spacing:.08em;text-transform:uppercase;">Pass back to Player 1</div>
+    <div class="card" style="width:100%;text-align:center;">
+      <p style="font-size:.85rem;color:rgba(255,255,255,.4);margin-bottom:10px;">Player 2 asks:</p>
+      <p id="current-q" style="font-size:1.2rem;font-weight:600;line-height:1.5;color:#fff;"></p>
+    </div>
+    <p style="color:rgba(255,255,255,.55);font-size:.9rem;">Player 1 — what's your answer?</p>
+    <div class="btn-row">
+      <button class="btn btn-yes" id="ans-yes" style="flex:1;min-width:120px;">✅ Yes</button>
+      <button class="btn btn-sorta" id="ans-sorta" style="flex:1;min-width:120px;">🤔 Sort of</button>
+      <button class="btn btn-no" id="ans-no" style="flex:1;min-width:120px;">❌ No</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 6 — DIRECT GUESS          -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-guess">
+  <div style="width:100%;max-width:480px;display:flex;flex-direction:column;gap:20px;align-items:center;">
+    <div class="game-title" style="font-size:2rem;">🎯 Direct Guess</div>
+    <p class="subtitle">Guesses left: <span id="guesses-left-2" style="color:#ec4899;font-weight:700;"></span></p>
+    <div class="card" style="width:100%;display:flex;flex-direction:column;gap:14px;">
+      <label for="guess-input">What's your guess?</label>
+      <input type="text" id="guess-input" placeholder="Type your answer…" autocomplete="off" maxlength="100"/>
+    </div>
+    <p style="font-size:.85rem;color:rgba(255,255,255,.4);text-align:center;">Pass to Player 1 to confirm</p>
+    <div class="btn-row">
+      <button class="btn btn-yes" id="guess-correct" style="flex:1;">✅ Correct!</button>
+      <button class="btn btn-no" id="guess-wrong" style="flex:1;">❌ Wrong</button>
+    </div>
+    <button class="btn btn-outline" id="back-to-questions">← Back to Questions</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════ -->
+<!--  SCREEN 7 — RESULT                -->
+<!-- ══════════════════════════════════ -->
+<div class="screen" id="screen-result">
+  <div style="text-align:center;max-width:480px;display:flex;flex-direction:column;align-items:center;gap:20px;">
+    <div class="result-icon" id="result-icon">🏆</div>
+    <div class="result-title" id="result-title"></div>
+    <p id="result-sub" style="color:rgba(255,255,255,.5);line-height:1.6;font-size:.95rem;"></p>
+    <div class="card" style="width:100%;text-align:center;">
+      <p style="font-size:.8rem;color:rgba(255,255,255,.4);margin-bottom:8px;">The secret was</p>
+      <div class="secret-reveal" id="secret-reveal"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-grad" id="btn-play-again" style="flex:1;">Play Again</button>
+      <a class="btn btn-outline" href="/" style="flex:1;text-align:center;text-decoration:none;">← Arcade</a>
+    </div>
+  </div>
+</div>
+
+<script>
+const MAX_Q = 21, MAX_GUESS = 3;
+let secret = '', questionsLeft = MAX_Q, guessesLeft = MAX_GUESS;
+let qaHistory = [], pendingQ = '', pendingIsGuess = false;
+
+// Screen management
+function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active')); document.getElementById(id).classList.add('active'); window.scrollTo(0,0); }
+
+// Update ring + bar
+function updateCounter(){
+  const count = document.getElementById('q-count');
+  const ring = document.getElementById('ring-fill');
+  const bar = document.getElementById('q-bar');
+  const gl1 = document.getElementById('guesses-left');
+  const gl2 = document.getElementById('guesses-left-2');
+  count.textContent = questionsLeft;
+  const circ = 301.6;
+  ring.style.strokeDashoffset = circ - (circ * questionsLeft / MAX_Q);
+  bar.style.width = (questionsLeft / MAX_Q * 100) + '%';
+  if(gl1) gl1.textContent = guessesLeft;
+  if(gl2) gl2.textContent = guessesLeft;
+  // Update guess chips
+  const chips = document.querySelectorAll('.chip');
+  chips.forEach((c,i) => c.classList.toggle('used', i >= guessesLeft));
+  // Ring color warning
+  ring.style.stroke = questionsLeft <= 5 ? '#ef4444' : questionsLeft <= 10 ? '#f59e0b' : 'url(#ringGrad)';
+  // Disable ask if out
+  document.getElementById('btn-ask').disabled = questionsLeft <= 0;
+  document.getElementById('btn-make-guess').disabled = guessesLeft <= 0;
+}
+
+function addToLog(q, ans){
+  const log = document.getElementById('qa-log');
+  if(qaHistory.length === 0) log.innerHTML = '';
+  qaHistory.push({q, ans});
+  const div = document.createElement('div');
+  div.className = 'log-item';
+  const cls = ans==='Yes'?'yes':ans==='No'?'no':'sorta';
+  div.innerHTML = `<div class="log-q">${qaHistory.length}. ${q}</div><div class="log-a ${cls}">${ans}</div>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function endGame(win, guessText=''){
+  // Confetti if player 2 wins
+  if(win) spawnConfetti();
+  document.getElementById('result-icon').textContent = win ? '🎉' : '😅';
+  document.getElementById('result-title').textContent = win ? 'Player 2 wins!' : 'Player 1 wins!';
+  document.getElementById('result-sub').textContent = win
+    ? (guessText ? `"${guessText}" was right! Asked ${MAX_Q - questionsLeft} question${MAX_Q-questionsLeft!==1?'s':''}.` : `Cracked it with ${questionsLeft} question${questionsLeft!==1?'s':''} to spare!`)
+    : (questionsLeft <= 0 ? 'All 21 questions used up — the secret held!' : 'All 3 guesses missed — the secret held!');
+  document.getElementById('secret-reveal').textContent = secret;
+  show('screen-result');
+}
+
+// ── Events ──────────────────────────────────
+document.getElementById('btn-start').onclick = () => show('screen-secret');
+document.getElementById('back-secret').onclick = () => show('screen-home');
+
+document.getElementById('btn-confirm-secret').onclick = () => {
+  const val = document.getElementById('secret-input').value.trim();
+  if(!val){ document.getElementById('secret-input').focus(); return; }
+  secret = val;
+  document.getElementById('secret-input').value = '';
+  show('screen-pass');
+};
+
+document.getElementById('btn-p2-ready').onclick = () => {
+  questionsLeft = MAX_Q; guessesLeft = MAX_GUESS;
+  qaHistory = [];
+  document.getElementById('qa-log').innerHTML = '<p style="color:rgba(255,255,255,.25);font-size:.85rem;text-align:center;padding:8px 0;">No questions asked yet. Go for it!</p>';
+  document.getElementById('q-input').value = '';
+  updateCounter();
+  show('screen-question');
+};
+
+document.getElementById('btn-ask').onclick = () => {
+  const q = document.getElementById('q-input').value.trim();
+  if(!q) return;
+  pendingQ = q; pendingIsGuess = false;
+  document.getElementById('current-q').textContent = q;
+  show('screen-answer');
+};
+document.getElementById('q-input').addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); document.getElementById('btn-ask').click(); } });
+
+['ans-yes','ans-sorta','ans-no'].forEach(id => {
+  document.getElementById(id).onclick = () => {
+    const ans = id==='ans-yes'?'Yes':id==='ans-sorta'?'Sort of':'No';
+    addToLog(pendingQ, ans);
+    questionsLeft--;
+    updateCounter();
+    document.getElementById('q-input').value = '';
+    if(questionsLeft <= 0) { show('screen-question'); setTimeout(()=>endGame(false),400); }
+    else show('screen-question');
+  };
+});
+
+document.getElementById('btn-make-guess').onclick = () => {
+  if(guessesLeft <= 0) return;
+  document.getElementById('guess-input').value = '';
+  document.getElementById('guesses-left-2').textContent = guessesLeft;
+  show('screen-guess');
+};
+
+document.getElementById('guess-correct').onclick = () => {
+  const g = document.getElementById('guess-input').value.trim() || '???';
+  guessesLeft--;
+  endGame(true, g);
+};
+
+document.getElementById('guess-wrong').onclick = () => {
+  const g = document.getElementById('guess-input').value.trim() || '???';
+  addToLog(`🎯 Guess: "${g}"`, 'No');
+  guessesLeft--;
+  updateCounter();
+  show('screen-question');
+  if(guessesLeft <= 0 && questionsLeft <= 0) endGame(false);
+  else if(guessesLeft <= 0){
+    // warn but let them keep asking
+  }
+};
+
+document.getElementById('back-to-questions').onclick = () => show('screen-question');
+document.getElementById('btn-play-again').onclick = () => {
+  document.getElementById('secret-input').value = '';
+  show('screen-secret');
+};
+
+// ── Confetti ─────────────────────────────────
+function spawnConfetti(){
+  const colors=['#a855f7','#ec4899','#fbbf24','#22c55e','#38bdf8','#fff'];
+  for(let i=0;i<120;i++){
+    const el=document.createElement('div');
+    el.className='confetti-piece';
+    const size=6+Math.random()*8;
+    el.style.cssText=`
+      left:${Math.random()*100}vw;width:${size}px;height:${size}px;
+      background:${colors[Math.floor(Math.random()*colors.length)]};
+      animation-duration:${2.5+Math.random()*2}s;
+      animation-delay:${Math.random()*.8}s;
+      border-radius:${Math.random()>.5?'50%':'2px'};
+    `;
+    document.body.appendChild(el);
+    setTimeout(()=>el.remove(), 5000);
+  }
+}
+</script>
+</body>
+</html>
